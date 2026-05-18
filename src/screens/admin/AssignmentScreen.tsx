@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -10,24 +10,28 @@ import {
   Alert, 
   Switch, 
   Keyboard,
-  RefreshControl 
+  RefreshControl,
+  Platform
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Picker } from '@react-native-picker/picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
+import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import DocumentPicker from 'react-native-document-picker'; 
 
-// Internal Systems & Network Service Layers
 import { useTheme } from '../../theme/ThemeContext';
 import { assignmentApi, Assignment, CreateAssignmentPayload } from '../../api/assignmentApi';
 import { subjectApi, Subject } from '../../api/subjectApi';
 import { batchApi, Batch } from '../../api/batchApi';
 
-// Is variable ko actual live backend session profile ke sath sync karein
-const ACTIVE_USER_ROLE: 'admin' | 'teacher' | 'student' = 'teacher';
-
-const AssignmentScreen = () => {
+// 🌟 Added 'navigation' prop here to allow moving to the Submissions screen
+const AssignmentScreen = ({ navigation }: { navigation: any }) => {
   const { theme } = useTheme();
 
-  // Data Store Engine
+  const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'teacher' | 'student'>('student');
+  const [currentUserId, setCurrentUserId] = useState<string>('');
+
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [availableSubjects, setAvailableSubjects] = useState<Subject[]>([]);
   const [availableBatches, setAvailableBatches] = useState<Batch[]>([]);
@@ -36,7 +40,6 @@ const AssignmentScreen = () => {
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  // Form State Values
   const [editingId, setEditingId] = useState<string | null>(null);
   const [title, setTitle] = useState<string>('');
   const [description, setDescription] = useState<string>('');
@@ -45,58 +48,75 @@ const AssignmentScreen = () => {
   const [dueDateText, setDueDateText] = useState<string>('2026-05-15');
   const [totalMarksText, setTotalMarksText] = useState<string>('100');
   const [isActive, setIsActive] = useState<boolean>(true);
+  
+  const [teacherFiles, setTeacherFiles] = useState<any[]>([]);
+  const [studentFiles, setStudentFiles] = useState<any[]>([]);
 
-  // Student Actions Engine
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null);
   const [studentContent, setStudentContent] = useState<string>('');
 
-  useEffect(() => {
-    fetchSmartDependencies();
-  }, []);
-
-  // SMART LOADING: Handles dynamic session fallbacks to bypass route locks
-  const fetchSmartDependencies = async () => {
+  const fetchSmartDependencies = useCallback(async (roleOverride?: 'admin' | 'teacher' | 'student') => {
     setIsLoading(true);
     try {
-      // 1. Fetch Assignments safely based on profile bounds
-      const assignRes = ACTIVE_USER_ROLE === 'student' 
+      const targetRole = roleOverride || currentUserRole;
+
+      const assignRes = targetRole === 'student' 
         ? await assignmentApi.getMyAssignments() 
         : await assignmentApi.getAll();
       
       if (assignRes?.success) {
         setAssignments(assignRes.data || assignRes.result || assignRes.assignments || []);
+      } else {
+        setAssignments([]);
       }
 
-      // 2. Fetch Subjects using bypass blocks catching specific authorization blocks
-      let subRes;
-      try {
-        subRes = await subjectApi.getAll();
-      } catch (err) {
-        // Fallback to teacher restricted paths if global scan block drops
-        subRes = await subjectApi.getMySubjects();
-      }
-      if (subRes?.success) {
-        setAvailableSubjects(subRes.data || subRes.result || subRes.subjects || []);
-      }
+      if (targetRole !== 'student') {
+        const [subRes, batRes] = await Promise.all([
+          subjectApi.getAll(),
+          targetRole === 'teacher' ? batchApi.getMyBatches() : batchApi.getAll()
+        ]);
 
-      // 3. Fetch Batches using double fallback verification
-      let batRes;
-      try {
-        batRes = ACTIVE_USER_ROLE === 'teacher' ? await batchApi.getMyBatches() : await batchApi.getAll();
-      } catch (err) {
-        // Direct bypass targeting opposite scope boundaries if static role mapping clashes
-        batRes = ACTIVE_USER_ROLE === 'teacher' ? await batchApi.getAll() : await batchApi.getMyBatches();
+        if (subRes?.success) setAvailableSubjects(subRes.data || subRes.result || subRes.subjects || []);
+        if (batRes?.success) setAvailableBatches(batRes.data || batRes.result || batRes.batches || []);
       }
-      if (batRes?.success) {
-        setAvailableBatches(batRes.data || batRes.result || batRes.batches || []);
-      }
-
     } catch (error: any) {
-      console.warn("Silent Session Evaluation Fallback:", error?.message);
+      console.warn("Session Evaluation Fallback Interrupted:", error?.message);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [currentUserRole]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let isMounted = true;
+      const verifyAndInitializeRuntimeState = async () => {
+        try {
+          const storedString = await AsyncStorage.getItem("user_data");
+          let evaluatedRole: 'admin' | 'teacher' | 'student' = 'student';
+          
+          if (storedString) {
+            const userObj = JSON.parse(storedString);
+            if (userObj?._id) setCurrentUserId(userObj._id);
+
+            if (userObj?.role) {
+              if (typeof userObj.role === 'string') evaluatedRole = userObj.role.trim().toLowerCase() as any;
+              else if (typeof userObj.role === 'object' && userObj.role.name) evaluatedRole = userObj.role.name.trim().toLowerCase() as any;
+            }
+            if (!['admin', 'teacher', 'student'].includes(evaluatedRole)) evaluatedRole = 'student'; 
+            
+            if (isMounted) setCurrentUserRole(evaluatedRole);
+          }
+          if (isMounted) await fetchSmartDependencies(evaluatedRole);
+        } catch (err) {
+          console.warn("Storage runtime error:", err);
+          if (isMounted) setIsLoading(false);
+        }
+      };
+
+      verifyAndInitializeRuntimeState();
+      return () => { isMounted = false; };
+    }, [fetchSmartDependencies])
+  );
 
   const handlePullToRefresh = async () => {
     setIsRefreshing(true);
@@ -113,20 +133,54 @@ const AssignmentScreen = () => {
     setDueDateText('2026-05-15');
     setTotalMarksText('100');
     setIsActive(true);
+    setTeacherFiles([]); 
     Keyboard.dismiss();
+  };
+
+  const handlePickTeacherFiles = async () => {
+    try {
+      const res = await DocumentPicker.pick({
+        allowMultiSelection: true,
+        type: [DocumentPicker.types.allFiles],
+      });
+      if (res.length > 5) {
+        Alert.alert("Limit Exceeded", "You can only upload up to 5 files.");
+        setTeacherFiles(res.slice(0, 5));
+      } else {
+        setTeacherFiles(res);
+      }
+    } catch (err) {
+      if (!DocumentPicker.isCancel(err)) Alert.alert("Error", "Failed to pick documents");
+    }
+  };
+
+  const handlePickStudentFiles = async () => {
+    try {
+      const res = await DocumentPicker.pick({
+        allowMultiSelection: true,
+        type: [DocumentPicker.types.allFiles],
+      });
+      if (res.length > 10) {
+        Alert.alert("Limit Exceeded", "You can only upload up to 10 files.");
+        setStudentFiles(res.slice(0, 10));
+      } else {
+        setStudentFiles(res);
+      }
+    } catch (err) {
+      if (!DocumentPicker.isCancel(err)) Alert.alert("Error", "Failed to pick documents");
+    }
   };
 
   const handleTriggerEdit = (item: Assignment) => {
     setEditingId(item._id);
     setTitle(item.title);
     setDescription(item.description);
-    
-    setSelectedSubjectId(typeof item.subjectId === 'object' ? item.subjectId._id : item.subjectId);
-    setSelectedBatchId(typeof item.batchId === 'object' ? item.batchId._id : item.batchId);
-    
+    setSelectedSubjectId(typeof item.subjectId === 'object' && item.subjectId ? item.subjectId._id : item.subjectId);
+    setSelectedBatchId(typeof item.batchId === 'object' && item.batchId ? item.batchId._id : item.batchId);
     setDueDateText(item.dueDate.split('T')[0]);
     setTotalMarksText(item.totalMarks.toString());
-    setIsActive(item.isActive);
+    setIsActive(item.isActive !== undefined ? item.isActive : true);
+    setTeacherFiles([]); 
   };
 
   const handleSaveOrUpdate = async () => {
@@ -140,23 +194,38 @@ const AssignmentScreen = () => {
       return;
     }
 
-    const isoRegex = /^\d{4}-\d{2}-\d{2}$/;
-    if (!isoRegex.test(cleanDue)) {
-      Alert.alert('Date Format Error', 'date format will be yyyy-mm-dd');
-      return;
-    }
-
     setIsSubmitting(true);
-    const payload: CreateAssignmentPayload = {
-      title: cleanTitle,
-      description: cleanDesc,
-      subjectId: selectedSubjectId,
-      batchId: selectedBatchId,
-      dueDate: new Date(cleanDue).toISOString(),
-      totalMarks: parsedMarks,
-    };
+    let finalAttachmentUrls: string[] = [];
 
     try {
+      if (teacherFiles.length > 0) {
+        const formData = new FormData();
+        teacherFiles.forEach((file) => {
+          formData.append('files', { 
+            uri: file.uri,
+            type: file.type || 'application/pdf',
+            name: file.name,
+          } as any);
+        });
+
+        const uploadRes = await assignmentApi.uploadAssignmentFiles(formData);
+        if (uploadRes?.success) {
+          finalAttachmentUrls = uploadRes.data?.fileUrls || uploadRes.urls || [];
+        } else {
+          Alert.alert("Upload Warning", "Files failed to upload, submitting text only.");
+        }
+      }
+
+      const payload: CreateAssignmentPayload = {
+        title: cleanTitle,
+        description: cleanDesc,
+        subjectId: selectedSubjectId,
+        batchId: selectedBatchId,
+        dueDate: new Date(cleanDue).toISOString(),
+        totalMarks: parsedMarks,
+        attachments: finalAttachmentUrls.length > 0 ? finalAttachmentUrls : undefined,
+      };
+
       let response;
       if (editingId) {
         response = await assignmentApi.update(editingId, { ...payload, isActive });
@@ -165,14 +234,62 @@ const AssignmentScreen = () => {
       }
 
       if (response?.success) {
-        Alert.alert('Success', editingId ? 'Assignment updated' : 'Updated');
+        Alert.alert('Success', editingId ? 'Assignment updated.' : 'Assignment published successfully.');
         resetFormState();
         fetchSmartDependencies();
       } else {
-        Alert.alert('Restricted Access', response?.message || 'You are not autherize for this batch ');
+        Alert.alert('Restricted Access', response?.message || 'Failed to save.');
       }
     } catch (error: any) {
-      Alert.alert('Action Blocked', error.response?.data?.message || 'Server connection lost');
+      Alert.alert('Action Blocked', error.response?.data?.message || 'Network update connectivity failed.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleStudentSubmission = async (assignmentId: string) => {
+    if (!studentContent.trim() && studentFiles.length === 0) {
+      Alert.alert('Empty Submission', 'Please write an answer or attach a file.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    let finalSubmissionUrls: string[] = [];
+
+    try {
+      if (studentFiles.length > 0) {
+        const formData = new FormData();
+        studentFiles.forEach((file) => {
+          formData.append('files', { 
+            uri: file.uri,
+            type: file.type || 'application/pdf',
+            name: file.name,
+          } as any);
+        });
+
+        const uploadRes = await assignmentApi.uploadSubmissionFiles(formData);
+        if (uploadRes?.success) {
+          finalSubmissionUrls = uploadRes.data?.fileUrls || uploadRes.urls || [];
+        } else {
+          Alert.alert("Upload Warning", "Files failed to upload.");
+        }
+      }
+
+      const response = await assignmentApi.submitAssignment({
+        assignmentId,
+        content: studentContent.trim(),
+        attachments: finalSubmissionUrls.length > 0 ? finalSubmissionUrls : undefined,
+      });
+
+      if (response?.success) {
+        Alert.alert('Done!', response.message || 'Homework submitted successfully.');
+        setSelectedAssignmentId(null);
+        setStudentContent('');
+        setStudentFiles([]);
+        fetchSmartDependencies();
+      }
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.message || 'Submission failed.');
     } finally {
       setIsSubmitting(false);
     }
@@ -180,8 +297,8 @@ const AssignmentScreen = () => {
 
   const handleDelete = (id: string) => {
     Alert.alert(
-      'Delete Assignment',
-      'Do you want to delete',
+      'Confirm Wipe',
+      'Are you sure you want to delete this assignment?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -195,7 +312,7 @@ const AssignmentScreen = () => {
                 fetchSmartDependencies();
               }
             } catch (error: any) {
-              Alert.alert('Error', error.response?.data?.message || 'failed to delete');
+              Alert.alert('Error', error.response?.data?.message || 'Failed to delete record.');
             }
           }
         }
@@ -203,33 +320,19 @@ const AssignmentScreen = () => {
     );
   };
 
-  const handleStudentSubmission = async (assignmentId: string) => {
-    if (!studentContent.trim()) {
-      Alert.alert('Empty Submission', 'Pehle apna answer text mein likhein.');
-      return;
-    }
-
-    try {
-      const response = await assignmentApi.submitAssignment({
-        assignmentId,
-        content: studentContent.trim(),
-      });
-
-      if (response?.success) {
-        Alert.alert('Done!', response.message);
-        setSelectedAssignmentId(null);
-        setStudentContent('');
-        fetchSmartDependencies();
-      }
-    } catch (error: any) {
-      Alert.alert('Error', error.response?.data?.message || 'Not Submited ');
-    }
-  };
-
+  // =================================================================
+  // 🌟 THE UPDATED CARD RENDERER (Includes View Submissions Button)
+  // =================================================================
+  // =================================================================
+  // 🌟 THE UPDATED CARD RENDERER (Includes Student Feedback View)
+  // =================================================================
   const renderAssignmentCard = ({ item }: { item: Assignment }) => {
-    const isTeacherOrAdmin = ACTIVE_USER_ROLE !== 'student';
+    if (!item) return null;
+
+    const uploaderId = typeof item.teacherId === 'object' ? item.teacherId?._id : (item.teacherId || item.createdBy);
+    const canManage = currentUserRole === 'admin' || (currentUserRole === 'teacher' && uploaderId === currentUserId);
     
-    const subjectName = typeof item.subjectId === 'object' && item.subjectId ? item.subjectId.name : 'Deleted Topic';
+    const subjectName = typeof item.subjectId === 'object' && item.subjectId ? item.subjectId.name : 'Unknown Subject';
     const batchName = typeof item.batchId === 'object' && item.batchId ? item.batchId.name : 'Unknown Group';
 
     return (
@@ -249,28 +352,59 @@ const AssignmentScreen = () => {
           <Text style={[styles.infoText, { color: theme.subText }]}>Due Date: {item.dueDate.split('T')[0]}</Text>
         </View>
 
-        {isTeacherOrAdmin ? (
+        {currentUserRole !== 'student' ? (
           <View style={styles.actionRow}>
-            <TouchableOpacity onPress={() => handleTriggerEdit(item)} style={styles.actionButton}>
-              <Text style={[styles.editText, { color: theme.primary }]}>Edit</Text>
-            </TouchableOpacity>
+            {canManage && (
+              <>
+                <TouchableOpacity 
+                  onPress={() => navigation.navigate('AssignmentSubmissions', { 
+                    assignmentId: item._id, 
+                    assignmentTitle: item.title, 
+                    totalMarks: item.totalMarks 
+                  })} 
+                  style={[styles.actionButton, { borderColor: '#10B981', borderWidth: 1, backgroundColor: 'rgba(16, 185, 129, 0.1)' }]}
+                >
+                  <Text style={{ color: '#10B981', fontWeight: 'bold', fontSize: 13 }}>View Submissions</Text>
+                </TouchableOpacity>
 
-            <TouchableOpacity onPress={() => handleDelete(item._id)} style={styles.actionButton}>
-              <Text style={styles.deleteText}>Delete</Text>
-            </TouchableOpacity>
+                <TouchableOpacity onPress={() => handleTriggerEdit(item)} style={[styles.actionButton, { borderWidth: 1, borderColor: theme.border }]}>
+                  <Text style={[styles.editText, { color: theme.primary }]}>Edit</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity onPress={() => handleDelete(item._id)} style={[styles.actionButton, { borderWidth: 1, borderColor: '#FEE2E2', backgroundColor: '#FEF2F2' }]}>
+                  <Text style={styles.deleteText}>Delete</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         ) : (
           <View style={styles.submissionContainer}>
             {item.mySubmission ? (
-              <View style={[styles.statusBanner, { borderColor: theme.border }]}>
-                <Text style={[styles.statusText, { color: theme.text }]}>
-                  Status: <Text style={{ fontWeight: 'bold', textTransform: 'capitalize' }}>{item.mySubmission.status}</Text>
-                </Text>
-                {item.mySubmission.marksObtained !== undefined && (
-                  <Text style={[styles.statusText, { color: theme.primary, fontWeight: 'bold' }]}>
-                    Score: {item.mySubmission.marksObtained} / {item.totalMarks}
+              // 🌟 YAHAN CHANGES HUE HAIN - Flex direction column kiya gaya hai taaki feedback niche aa sake
+              <View style={[styles.statusBanner, { borderColor: theme.border, flexDirection: 'column' }]}>
+                
+                {/* Status aur Score ki Row */}
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Text style={[styles.statusText, { color: theme.text }]}>
+                    Status: <Text style={{ fontWeight: 'bold', textTransform: 'capitalize' }}>{item.mySubmission.status}</Text>
                   </Text>
-                )}
+                  {item.mySubmission.marksObtained !== undefined && (
+                    <Text style={[styles.statusText, { color: theme.primary, fontWeight: 'bold' }]}>
+                      Score: {item.mySubmission.marksObtained} / {item.totalMarks}
+                    </Text>
+                  )}
+                </View>
+
+                {/* 🌟 STUDENT FEEDBACK UI */}
+                {item.mySubmission.feedback ? (
+                  <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.05)' }}>
+                    <Text style={{ fontSize: 13, color: theme.subText }}>
+                      <Text style={{ fontWeight: 'bold', color: theme.text }}>Feedback: </Text>
+                      {item.mySubmission.feedback}
+                    </Text>
+                  </View>
+                ) : null}
+
               </View>
             ) : (
               <View style={{ marginTop: 8 }}>
@@ -286,18 +420,26 @@ const AssignmentScreen = () => {
                       numberOfLines={3}
                       textAlignVertical="top"
                     />
-                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 4 }}>
-                      <TouchableOpacity onPress={() => { setSelectedAssignmentId(null); setStudentContent(''); }} style={{ marginRight: 16 }}>
+                    
+                    <TouchableOpacity onPress={handlePickStudentFiles} style={styles.attachBtn}>
+                      <MaterialIcons name="attach-file" size={18} color={theme.subText} />
+                      <Text style={{ color: theme.subText, marginLeft: 6, fontSize: 12 }}>
+                        {studentFiles.length > 0 ? `${studentFiles.length} file(s) attached` : 'Attach Documents (Max 10)'}
+                      </Text>
+                    </TouchableOpacity>
+
+                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
+                      <TouchableOpacity onPress={() => { setSelectedAssignmentId(null); setStudentContent(''); setStudentFiles([]); }} style={{ marginRight: 16 }}>
                         <Text style={{ color: '#D32F2F', fontWeight: '600' }}>Cancel</Text>
                       </TouchableOpacity>
-                      <TouchableOpacity onPress={() => handleStudentSubmission(item._id)}>
-                        <Text style={{ color: theme.primary, fontWeight: 'bold' }}>Submit Answer</Text>
+                      <TouchableOpacity onPress={() => handleStudentSubmission(item._id)} disabled={isSubmitting}>
+                        {isSubmitting ? <ActivityIndicator size="small" color={theme.primary} /> : <Text style={{ color: theme.primary, fontWeight: 'bold' }}>Submit Answer</Text>}
                       </TouchableOpacity>
                     </View>
                   </View>
                 ) : (
                   <TouchableOpacity onPress={() => setSelectedAssignmentId(item._id)} style={[styles.submitTriggerBtn, { borderColor: theme.primary }]}>
-                    <Text style={{ color: theme.primary, fontWeight: 'bold', fontSize: 13 }}>Submit Answer</Text>
+                    <Text style={{ color: theme.primary, fontWeight: 'bold', fontSize: 13 }}>Attempt Assignment</Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -308,155 +450,97 @@ const AssignmentScreen = () => {
     );
   };
 
+  const safeSubjects = Array.isArray(availableSubjects) ? availableSubjects : [];
+  const safeBatches = Array.isArray(availableBatches) ? availableBatches : [];
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['bottom']}>
-      
-      {/* 1. ASSIGNMENT ENTRY CONSOLE */}
-      {ACTIVE_USER_ROLE !== 'student' && (
-        <View style={[styles.formCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <View style={styles.formHeaderRow}>
-            <Text style={[styles.formTitle, { color: theme.text }]}>
-              {editingId ? 'Edit Assignment' : 'Create New Homework'}
-            </Text>
+      <FlatList
+        ListHeaderComponent={
+          <>
+            {currentUserRole !== 'student' && (
+              <View style={[styles.formCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <View style={styles.formHeaderRow}>
+                  <Text style={[styles.formTitle, { color: theme.text }]}>
+                    {editingId ? 'Edit Assignment' : 'Create New Homework'}
+                  </Text>
+                  {editingId && (
+                    <TouchableOpacity onPress={resetFormState}>
+                      <Text style={styles.cancelText}>Clear Array</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
 
-            {editingId && (
-              <TouchableOpacity onPress={resetFormState}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </TouchableOpacity>
+                <Text style={[styles.label, { color: theme.text }]}>Homework Title</Text>
+                <TextInput style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="e.g. Chapter 1 Practice" placeholderTextColor={theme.subText} value={title} onChangeText={setTitle} />
+
+                <View style={styles.row}>
+                  <View style={styles.pickerContainerHalf}>
+                    <Text style={[styles.label, { color: theme.text }]}>Subject</Text>
+                    <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border }]}>
+                      <Picker selectedValue={selectedSubjectId} onValueChange={setSelectedSubjectId} dropdownIconColor={theme.primary} style={{ color: theme.text }}>
+                        <Picker.Item label="-- Subject --" value="" color={theme.subText} />
+                        {safeSubjects.map(sub => <Picker.Item key={sub._id} label={sub.code || sub.name} value={sub._id} />)}
+                      </Picker>
+                    </View>
+                  </View>
+                  <View style={styles.pickerContainerHalf}>
+                    <Text style={[styles.label, { color: theme.text }]}>Batch</Text>
+                    <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border }]}>
+                      <Picker selectedValue={selectedBatchId} onValueChange={setSelectedBatchId} dropdownIconColor={theme.primary} style={{ color: theme.text }}>
+                        <Picker.Item label="-- Batch --" value="" color={theme.subText} />
+                        {safeBatches.map(b => <Picker.Item key={b._id} label={b.name} value={b._id} />)}
+                      </Picker>
+                    </View>
+                  </View>
+                </View>
+
+                <Text style={[styles.label, { color: theme.text }]}>Instructions</Text>
+                <TextInput style={[styles.input, { height: 60, backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="Type questions..." placeholderTextColor={theme.subText} value={description} onChangeText={setDescription} multiline />
+
+                <View style={styles.row}>
+                  <View style={styles.halfInput}>
+                    <Text style={[styles.label, { color: theme.text }]}>Due Date</Text>
+                    <TextInput style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="2026-05-15" placeholderTextColor={theme.subText} value={dueDateText} onChangeText={setDueDateText} maxLength={10} />
+                  </View>
+                  <View style={styles.halfInput}>
+                    <Text style={[styles.label, { color: theme.text }]}>Marks</Text>
+                    <TextInput style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="100" placeholderTextColor={theme.subText} value={totalMarksText} onChangeText={setTotalMarksText} keyboardType="numeric" />
+                  </View>
+                </View>
+
+                <TouchableOpacity onPress={handlePickTeacherFiles} style={[styles.attachBtn, { marginBottom: 12 }]}>
+                  <MaterialIcons name="attach-file" size={18} color={theme.subText} />
+                  <Text style={{ color: theme.subText, marginLeft: 6, fontSize: 12 }}>
+                    {teacherFiles.length > 0 ? `${teacherFiles.length} file(s) ready to upload` : 'Attach Resource Files (Max 5)'}
+                  </Text>
+                </TouchableOpacity>
+
+                {editingId && (
+                  <View style={styles.switchRow}>
+                    <Text style={{ color: theme.text, fontWeight: '500' }}>Active Status</Text>
+                    <Switch value={isActive} onValueChange={setIsActive} thumbColor={theme.primary} />
+                  </View>
+                )}
+
+                <TouchableOpacity style={[styles.mainButton, { backgroundColor: theme.primary }]} onPress={handleSaveOrUpdate} disabled={isSubmitting}>
+                  {isSubmitting ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnText}>{editingId ? 'Update' : 'Publish'}</Text>}
+                </TouchableOpacity>
+              </View>
             )}
-          </View>
-
-          <Text style={[styles.label, { color: theme.text }]}>Homework Title</Text>
-          <TextInput
-            style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]}
-            placeholder="e.g. Chapter 1 Practice"
-            placeholderTextColor={theme.subText}
-            value={title}
-            onChangeText={setTitle}
-          />
-
-          {/* DYNAMIC SUBJECT SELECTOR */}
-          <View style={styles.pickerContainer}>
-            <Text style={[styles.label, { color: theme.text }]}>Select Study Topic</Text>
-            <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border }]}>
-              <Picker
-                selectedValue={selectedSubjectId}
-                onValueChange={(itemValue) => setSelectedSubjectId(itemValue)}
-                dropdownIconColor={theme.primary}
-                style={{ color: theme.text }}
-              >
-                <Picker.Item label="-- Click to Choose Subject --" value="" color={theme.subText} />
-                {availableSubjects.map((sub) => (
-                  <Picker.Item 
-                    key={sub._id} 
-                    label={sub.name ? `${sub.name} (${sub.code || 'N/A'})` : 'Unnamed Subject'} 
-                    value={sub._id} 
-                  />
-                ))}
-              </Picker>
-            </View>
-          </View>
-
-          {/* DYNAMIC BATCH SELECTOR */}
-          <View style={styles.pickerContainer}>
-            <Text style={[styles.label, { color: theme.text }]}>Target Student Group</Text>
-            <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border }]}>
-              <Picker
-                selectedValue={selectedBatchId}
-                onValueChange={(itemValue) => setSelectedBatchId(itemValue)}
-                dropdownIconColor={theme.primary}
-                style={{ color: theme.text }}
-              >
-                <Picker.Item label="-- Click to Choose Batch --" value="" color={theme.subText} />
-                {availableBatches.map((bItem) => (
-                  <Picker.Item key={bItem._id} label={bItem.name || 'Unnamed Batch'} value={bItem._id} />
-                ))}
-              </Picker>
-            </View>
-          </View>
-
-          <Text style={[styles.label, { color: theme.text }]}>Questions & Guidelines</Text>
-          <TextInput
-            style={[styles.input, { height: 60, backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]}
-            placeholder="Type instructions or questions here..."
-            placeholderTextColor={theme.subText}
-            value={description}
-            onChangeText={setDescription}
-            multiline
-          />
-
-          <View style={styles.row}>
-            <View style={styles.halfInput}>
-              <Text style={[styles.label, { color: theme.text }]}>Last Submission Date</Text>
-              <TextInput
-                style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]}
-                placeholder="2026-05-15"
-                placeholderTextColor={theme.subText}
-                value={dueDateText}
-                onChangeText={setDueDateText}
-                keyboardType="numbers-and-punctuation"
-                maxLength={10}
-              />
-            </View>
-
-            <View style={styles.halfInput}>
-              <Text style={[styles.label, { color: theme.text }]}>Total Score / Points</Text>
-              <TextInput
-                style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]}
-                placeholder="100"
-                placeholderTextColor={theme.subText}
-                value={totalMarksText}
-                onChangeText={setTotalMarksText}
-                keyboardType="numeric"
-              />
-            </View>
-          </View>
-
-          {editingId && (
-            <View style={styles.switchRow}>
-              <Text style={{ color: theme.text, fontWeight: '500' }}>Active Status</Text>
-              <Switch value={isActive} onValueChange={setIsActive} thumbColor={theme.primary} />
-            </View>
-          )}
-
-          <TouchableOpacity
-            style={[styles.mainButton, { backgroundColor: theme.primary }]}
-            onPress={handleSaveOrUpdate}
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? (
-              <ActivityIndicator color="#FFF" />
-            ) : (
-              <Text style={styles.btnText}>{editingId ? 'Save Edits' : 'Publish Assignment'}</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* 2. REGISTRY FEED */}
-      <Text style={[styles.listHeader, { color: theme.text }]}>Assigned Tasks Registry</Text>
-
-      {isLoading ? (
-        <ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 40 }} />
-      ) : (
-        <FlatList
-          data={assignments}
-          keyExtractor={(item) => item._id}
-          renderItem={renderAssignmentCard}
-          contentContainerStyle={styles.listContent}
-          refreshControl={
-            <RefreshControl
-              refreshing={isRefreshing}
-              onRefresh={handlePullToRefresh}
-              colors={[theme.primary]}
-              tintColor={theme.primary}
-            />
-          }
-          ListEmptyComponent={
-            <Text style={[styles.emptyText, { color: theme.subText }]}>No records found</Text>
-          }
-        />
-      )}
+            <Text style={[styles.listHeader, { color: theme.text }]}>Assigned Tasks Registry</Text>
+          </>
+        }
+        data={assignments}
+        keyExtractor={(item) => item._id}
+        renderItem={renderAssignmentCard}
+        contentContainerStyle={styles.listContent}
+        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={handlePullToRefresh} colors={[theme.primary]} />}
+        ListEmptyComponent={
+          isLoading ? <ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 40 }} /> 
+          : <Text style={[styles.emptyText, { color: theme.subText }]}>No homework items evaluated.</Text>
+        }
+      />
     </SafeAreaView>
   );
 };
@@ -471,10 +555,8 @@ const styles = StyleSheet.create({
   input: { height: 44, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, marginBottom: 12 },
   row: { flexDirection: 'row', justifyContent: 'space-between' },
   halfInput: { width: '48%' },
-  
-  pickerContainer: { marginBottom: 12 },
+  pickerContainerHalf: { width: '48%', marginBottom: 12 },
   pickerWrapper: { height: 46, borderWidth: 1, borderRadius: 8, justifyContent: 'center', overflow: 'hidden' },
-
   switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 6 },
   mainButton: { height: 48, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginTop: 12 },
   btnText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
@@ -488,15 +570,16 @@ const styles = StyleSheet.create({
   descText: { fontSize: 14, marginBottom: 12, lineHeight: 20 },
   infoGrid: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 0.5, borderBottomColor: '#DDD', paddingBottom: 8, marginBottom: 8 },
   infoText: { fontSize: 12, fontWeight: '500' },
-  actionRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingTop: 4 },
-  actionButton: { marginLeft: 16, paddingVertical: 4 },
-  editText: { fontWeight: 'bold', fontSize: 14 },
-  deleteText: { color: '#D32F2F', fontWeight: 'bold', fontSize: 14 },
+  actionRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingTop: 8, marginTop: 4, borderTopWidth: 0.5, borderTopColor: '#EEE' },
+  actionButton: { marginLeft: 10, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, alignItems: 'center' },
+  editText: { fontWeight: 'bold', fontSize: 13 },
+  deleteText: { color: '#D32F2F', fontWeight: 'bold', fontSize: 13 },
   submissionContainer: { paddingTop: 4 },
   statusBanner: { flexDirection: 'row', justifyContent: 'space-between', borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: 'rgba(0,0,0,0.03)' },
   statusText: { fontSize: 13 },
   submissionInput: { height: 70, paddingTop: 8, marginBottom: 6 },
   submitTriggerBtn: { borderWidth: 1, borderRadius: 6, paddingVertical: 6, alignItems: 'center' },
+  attachBtn: { flexDirection: 'row', alignItems: 'center', padding: 8, borderWidth: 1, borderColor: '#DDD', borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.02)' },
   emptyText: { textAlign: 'center', marginTop: 30, fontSize: 14 },
 });
 

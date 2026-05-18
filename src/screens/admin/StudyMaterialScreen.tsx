@@ -58,7 +58,7 @@ const StudyMaterialScreen = ({ navigation }: { navigation: any }) => {
   const [isPublicState, setIsPublicState] = useState<boolean>(false);
   const [isActiveState, setIsActiveState] = useState<boolean>(true);
 
-  // Fetch Master Data Sets based heavily on resolved dynamic runtime scopes
+  // 🌟 ROLE-BASED SMART FETCHING
   const fetchLibraryDependencies = useCallback(async (roleOverride?: 'admin' | 'teacher' | 'student') => {
     setIsLoading(true);
     try {
@@ -68,13 +68,14 @@ const StudyMaterialScreen = ({ navigation }: { navigation: any }) => {
       if (filterSubjectId) queryParams.subjectId = filterSubjectId;
       if (filterType) queryParams.type = filterType;
 
-      // 🌟 EXACT BACKEND ROUTE MAPPING
+      // Agar Student hai toh apna route fetch karega, warna Admin/Teacher apna route
       const [matsRes, subsRes, batchesRes] = await Promise.all([
         targetRole === 'student' ? studyMaterialApi.getMyMaterials(queryParams) : studyMaterialApi.getAll(queryParams),
         subjectApi.getAll(),
         targetRole !== 'student' ? batchApi.getAll() : Promise.resolve([]),
       ]);
 
+      // Handle Data Mapping
       if (matsRes?.success) {
         setMaterialsFeed(Array.isArray(matsRes.data) ? matsRes.data : []);
       } else {
@@ -97,7 +98,7 @@ const StudyMaterialScreen = ({ navigation }: { navigation: any }) => {
     }
   }, [currentUserRole, filterSubjectId, filterType]);
 
-  // Handle Authentication Evaluation Lifecycles
+  // Evaluate Runtime Permissions on Screen Load
   useFocusEffect(
     useCallback(() => {
       let isMounted = true;
@@ -143,13 +144,25 @@ const StudyMaterialScreen = ({ navigation }: { navigation: any }) => {
     Keyboard.dismiss();
   };
 
-  const handleTriggerEdit = (item: StudyMaterial) => {
+  // 🌟 FIX: EDIT FUNCTION NOW MAPS ALL REQUIRED FIELDS CORRECTLY
+ const handleTriggerEdit = (item: StudyMaterial) => {
     if (!item) return;
     setEditingId(item._id);
     setTitleInput(item.title || '');
     setDescInput(item.description || '');
-    setSelectedSubjectId(typeof item.subjectId === 'object' ? item.subjectId._id : item.subjectId);
-    setSelectedBatchId(item.batchId ? (typeof item.batchId === 'object' ? item.batchId._id : item.batchId) : '');
+    
+    const subId = typeof item.subjectId === 'object' && item.subjectId ? item.subjectId._id : (item.subjectId || '');
+    const bId = typeof item.batchId === 'object' && item.batchId ? item.batchId._id : (item.batchId || '');
+    const [originalSubjectId, setOriginalSubjectId] = useState<string>('');
+  const [originalBatchId, setOriginalBatchId] = useState<string>('');
+    
+    setSelectedSubjectId(subId);
+    setSelectedBatchId(bId);
+
+    // 🌟 NAYI LINES ADD KAREIN
+    setOriginalSubjectId(subId);
+    setOriginalBatchId(bId);
+    
     setResourceType(item.type || 'notes');
     setFileUrlInput(item.fileUrl || '');
     setIsPublicState(item.isPublic || false);
@@ -160,7 +173,6 @@ const StudyMaterialScreen = ({ navigation }: { navigation: any }) => {
 
     MasterScrollRef?.scrollTo({ y: 0, animated: true });
   };
-
   let MasterScrollRef: ScrollView | null = null;
 
   const handleSaveOrUpdate = async () => {
@@ -168,13 +180,25 @@ const StudyMaterialScreen = ({ navigation }: { navigation: any }) => {
     const cleanUrl = fileUrlInput.trim();
 
     if (!cleanTitle || !selectedSubjectId || !cleanUrl) {
-      Alert.alert('Validation Error', 'Title, target subject assignment, and explicit source file URL are strictly required.');
+      Alert.alert('Missing Information', 'Please provide the Document Title, select a Subject, and enter the File URL before saving.');
       return;
+    }
+
+    // 🌟 YAHAN NAYA VALIDATION ADD KIYA HAI
+    if (editingId) {
+      if (selectedSubjectId !== originalSubjectId || selectedBatchId !== originalBatchId) {
+        Alert.alert(
+          'Action Restricted', 
+          'Aap edit karte waqt Subject ya Batch change nahi kar sakte. Agar galat batch mein upload ho gaya hai, toh isey Delete karke naya material banayein.'
+        );
+        return; // Ye code ko yahi rok dega aur API call nahi hogi
+      }
     }
 
     setIsSubmitting(true);
     try {
       const tagsArray = tagsInput.trim() ? tagsInput.split(',').map(s => s.trim()).filter(Boolean) : undefined;
+      
       const payload: CreateMaterialPayload = {
         title: cleanTitle,
         description: descInput.trim() || undefined,
@@ -194,14 +218,15 @@ const StudyMaterialScreen = ({ navigation }: { navigation: any }) => {
       }
 
       if (res?.success) {
-        Alert.alert('Success', editingId ? 'Material updated.' : 'Document uploaded seamlessly.');
+        Alert.alert('Success!', editingId ? 'Material updated successfully.' : 'Study material uploaded successfully.');
         resetFormState();
         fetchLibraryDependencies();
       } else {
-        Alert.alert('Transmission Refused', res?.message || 'Action command blocked.');
+        Alert.alert('Action Failed', res?.message || 'Could not save the material. Please check your permissions.');
       }
     } catch (error: any) {
-      Alert.alert('Validation Error', error.response?.data?.message || 'Network logic failure.');
+      const errorMsg = error.response?.data?.message || 'Unable to connect to the server. Please try again.';
+      Alert.alert('Oops! Something went wrong', errorMsg);
     } finally {
       setIsSubmitting(false);
     }
@@ -210,21 +235,28 @@ const StudyMaterialScreen = ({ navigation }: { navigation: any }) => {
   const handleDeleteMaterial = (id: string) => {
     Alert.alert(
       'Confirm Deletion',
-      'Are you sure you want to delete this study material?',
+      'Are you sure you want to permanently delete this study material?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Delete',
+          text: 'Yes, Delete',
           style: 'destructive',
           onPress: async () => {
             try {
               const res = await studyMaterialApi.delete(id);
               if (res?.success) {
+                // Success
+                Alert.alert('Deleted', 'Material has been removed successfully.');
                 if (editingId === id) resetFormState();
                 fetchLibraryDependencies();
+              } else {
+                // Backend Rejection
+                Alert.alert('Deletion Failed', res?.message || 'You do not have permission to delete this item.');
               }
             } catch (error: any) {
-              Alert.alert('Action Refused', error.response?.data?.message || 'Deletion failed.');
+              // Network Error
+              const errorMsg = error.response?.data?.message || 'Failed to connect to the server. Please try again.';
+              Alert.alert('Error', errorMsg);
             }
           }
         }
@@ -236,11 +268,11 @@ const StudyMaterialScreen = ({ navigation }: { navigation: any }) => {
     if (!item) return null;
     
     // Evaluate display conditions explicitly matching runtime logic structures
-    const uploaderId = typeof item.uploadedBy === 'object' ? item.uploadedBy?._id : item.uploadedBy;
+    const uploaderId = typeof item.uploadedBy === 'object' ? item.uploadedBy?._id : (item.uploadedBy || item.createdBy);
     const canManage = currentUserRole === 'admin' || (currentUserRole === 'teacher' && uploaderId === currentUserId);
     
     const subObj = typeof item.subjectId === 'object' && item.subjectId ? item.subjectId : null;
-    const subjectName = subObj ? `${subObj.name} (${subObj.code || ''})` : 'Unmapped Subject Base';
+    const subjectName = subObj ? `${subObj.name} (${subObj.code || ''})` : 'System Subject';
     
     let dateStr = 'N/A';
     if (typeof item.createdAt === 'string') dateStr = item.createdAt.split('T')[0];
@@ -273,6 +305,7 @@ const StudyMaterialScreen = ({ navigation }: { navigation: any }) => {
             <Text style={{ color: '#0288D1', fontWeight: 'bold', fontSize: 12 }}>Access Resource File</Text>
           </TouchableOpacity>
 
+          {/* EDIT AND DELETE VISIBLE ONLY TO ADMIN OR UPLOADING TEACHER */}
           {canManage && (
             <View style={{ flexDirection: 'row' }}>
               <TouchableOpacity onPress={() => handleTriggerEdit(item)} style={{ paddingHorizontal: 12, paddingVertical: 6 }}>
@@ -305,7 +338,7 @@ const StudyMaterialScreen = ({ navigation }: { navigation: any }) => {
                 <Text style={[styles.formTitle, { color: theme.text }]}>{editingId ? 'Modify Material' : 'Upload Study Material'}</Text>
                 {editingId && (
                   <TouchableOpacity onPress={resetFormState}>
-                    <Text style={styles.cancelText}>Cancel</Text>
+                    <Text style={styles.cancelText}>Cancel Edit</Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -350,7 +383,7 @@ const StudyMaterialScreen = ({ navigation }: { navigation: any }) => {
 
               <View style={styles.toggleCluster}>
                 <View style={styles.switchRow}>
-                  <Text style={{ color: theme.text, fontWeight: '500', fontSize: 12 }}>Make Public (Visible to all)</Text>
+                  <Text style={{ color: theme.text, fontWeight: '500', fontSize: 12 }}>Make Public (Visible to all students)</Text>
                   <Switch value={isPublicState} onValueChange={setIsPublicState} thumbColor={theme.primary} />
                 </View>
                 {editingId && (
@@ -417,7 +450,7 @@ const StudyMaterialScreen = ({ navigation }: { navigation: any }) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  formWrapperBox: { padding: 16, borderRadius: 12, borderWidth: 1, marginBottom: 14 },
+  formWrapperBox: { padding: 16, borderRadius: 11, borderWidth: 1, marginBottom: 14 },
   formHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   formTitle: { fontSize: 18, fontWeight: 'bold' },
   cancelText: { color: '#D32F2F', fontWeight: '600', fontSize: 14 },

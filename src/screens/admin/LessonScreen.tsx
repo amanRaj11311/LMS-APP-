@@ -406,7 +406,7 @@ const LessonScreen = ({ navigation }: { navigation: any }) => {
           {/* SECTION 2: TOP 3 LIST VIEWS */}
           {/* ========================================== */}
           <View style={styles.miniRegistryBlock}>
-            <Text style={[styles.registryHeading, { color: theme.text }]}>Active Instructional Calendar (Top 3)</Text>
+            <Text style={[styles.registryHeading, { color: theme.text }]}>All Lessons(Top 3)</Text>
             
             {isLoading ? (
               <ActivityIndicator size="small" color={theme.primary} style={{ marginVertical: 20 }} />

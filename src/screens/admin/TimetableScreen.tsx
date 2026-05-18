@@ -348,16 +348,16 @@ const TimetableScreen = ({ navigation }: { navigation: any }) => {
     return (
       <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
         <View style={styles.cardHeaderRow}>
-          <Text style={[styles.cardTitleText, { color: theme.text }]} numberOfLines={1}>Cohort: {batchName}</Text>
+          <Text style={[styles.cardTitleText, { color: theme.text }]} numberOfLines={1}>Batch: {batchName}</Text>
           <View style={[styles.statusBadge, { backgroundColor: item.isActive !== false ? theme.primary : '#757575' }]}>
             <Text style={styles.badgeText}>{item.isActive !== false ? 'ACTIVE' : 'INACTIVE'}</Text>
           </View>
         </View>
 
-        <Text style={{ fontSize: 12, color: theme.text, fontWeight: '600', marginBottom: 2 }}>Class Mapping: {className}</Text>
+        <Text style={{ fontSize: 12, color: theme.text, fontWeight: '600', marginBottom: 2 }}>Class : {className}</Text>
         <Text style={{ fontSize: 12, color: theme.subText, marginBottom: 8 }}>Operational From: {effFrom}</Text>
 
-        <Text style={{ fontSize: 11, fontWeight: 'bold', color: theme.primary, marginBottom: 4 }}>Assigned Instructional Roster ({slotsArr.length} Slots)</Text>
+        <Text style={{ fontSize: 11, fontWeight: 'bold', color: theme.primary, marginBottom: 4 }}>Assigned Instructional({slotsArr.length} Slots)</Text>
         <View style={styles.slotsGrid}>
           {slotsArr.map((s: any, index: number) => {
             const subObj = typeof s.subjectId === 'object' && s.subjectId ? s.subjectId : null;
@@ -551,7 +551,7 @@ const TimetableScreen = ({ navigation }: { navigation: any }) => {
           {/* ========================================== */}
           <View style={styles.miniRegistryBlock}>
             <Text style={[styles.registryHeading, { color: theme.text }]}>
-              {currentUserRole === 'student' ? 'My Core Dynamic Timetable' : currentUserRole === 'teacher' ? 'My Instructional Slots' : 'Extracted Batch Timetables'}
+              {currentUserRole === 'student' ? 'Timetable' : currentUserRole === 'teacher' ? 'My Instructional Slots' : 'Extracted Batch Timetables'}
             </Text>
             
             {isLoading ? (

@@ -25,6 +25,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // Core Themes and Unified Standard Layout Modules
 import { useTheme } from '../theme/ThemeContext';
 import GlobalHeader from '../components/GlobalHeader';
+ import {BASE_URL} from "../api/apiConfig";
 
 // ==========================================
 // ALL IMPORTED ENTERPRISE SCREENS
@@ -53,9 +54,10 @@ import AllLeavesFeedScreen from '../screens/admin/AllLeavesFeedScreen';
 import StudyMaterialScreen from '../screens/admin/StudyMaterialScreen';
 import AllMaterialsFeedScreen from '../screens/admin/AllMaterialsFeedScreen';
 
-// 🌟 INJECTED MASTER SCREENS
-import DashboardScreen from '../screens/admin/DashboardScreen'; // The interlinked dashboard we built
-import ProfileScreen from '../screens/admin/ProfileScreen';     // The fully editable profile screen
+// 🌟 INJECTED MASTER SCREENS & NEW SUBMISSION SCREEN
+import DashboardScreen from '../screens/admin/DashboardScreen'; 
+import ProfileScreen from '../screens/admin/ProfileScreen';     
+import AssignmentSubmissionsScreen from '../screens/admin/AssignmentSubmissionsScreen'; // <-- Nayi Screen Import ki gayi
 
 // Temporary Functional Layout Placeholders
 const CoursesScreen = () => (
@@ -238,7 +240,7 @@ const BottomTabs = () => {
 const CustomDrawerContent = (props: DrawerContentComponentProps) => {
   const { theme } = useTheme();
   const currentRouteName = props.state.routes[props.state.index]?.name;
-  const baseUrl = "https://lmsapi.dcstechnosis.com";
+ 
 
   const [userData, setUserData] = useState({
     fullName: "Loading Profile...",
@@ -281,7 +283,7 @@ const CustomDrawerContent = (props: DrawerContentComponentProps) => {
             let avatarUrl = userObj.profileImage || userObj.profilePicture || null;
             if (avatarUrl && !avatarUrl.startsWith('http')) {
               const cleanPath = avatarUrl.startsWith('/') ? avatarUrl.substring(1) : avatarUrl;
-              avatarUrl = `${baseUrl}/${cleanPath}`;
+              avatarUrl = `${BASE_URL}/${cleanPath}`;
             }
 
             if (isMounted) {
@@ -513,6 +515,14 @@ const AppNavigator = () => {
           component={AllMaterialsFeedScreen} 
           options={{ header: (props) => <GlobalHeader {...props} /> }} 
         />
+
+        {/* 🌟 NAYI SCREEN YAHAN REGISTER KI GAYI HAI */}
+        <Stack.Screen 
+          name="AssignmentSubmissions" 
+          component={AssignmentSubmissionsScreen} 
+          options={{ header: (props) => <GlobalHeader {...props} /> }} 
+        />
+
       </Stack.Navigator>
     </NavigationContainer>
   );

@@ -187,7 +187,7 @@ const styles = StyleSheet.create({
   forgotPasswordContainer: { alignSelf: 'flex-end', marginBottom: 24 },
   forgotPasswordText: { fontSize: 14, fontWeight: '600' },
   loginButton: { height: 50, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginTop: 8 },
-  loginButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: 'bold' },
+  loginButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: 'bold' },
 });
 
 export default LoginScreen;
