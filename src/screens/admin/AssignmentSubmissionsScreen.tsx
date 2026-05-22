@@ -158,15 +158,26 @@ const AssignmentSubmissionsScreen = ({ route, navigation }: { route: any; naviga
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['bottom']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 8 }}>
-          <Text style={{ color: theme.primary, fontWeight: 'bold' }}>← Back</Text>
-        </TouchableOpacity>
-        <View style={{ marginLeft: 8 }}>
-          <Text style={[styles.title, { color: theme.text }]} numberOfLines={1}>{assignmentTitle}</Text>
-          <Text style={{ color: theme.subText, fontSize: 12 }}>Submissions ({submissions.length})</Text>
-        </View>
-      </View>
+     <View style={styles.header}>
+  <TouchableOpacity 
+    onPress={() => navigation.goBack()} 
+    style={{ padding: 8 }}
+  >
+    <Text style={{ color: theme.primary, fontWeight: 'bold' }}>
+      ← Back
+    </Text>
+  </TouchableOpacity>
+
+  <View style={{ flex: 1, marginLeft: 8 }}>
+    <Text style={[styles.title, { color: theme.text }]}>
+      {assignmentTitle}
+    </Text>
+
+    <Text style={{ color: theme.subText, fontSize: 12 }}>
+      Submissions ({submissions.length})
+    </Text>
+  </View>
+</View>
 
       {isLoading ? (
         <ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 40 }} />
@@ -186,7 +197,11 @@ const AssignmentSubmissionsScreen = ({ route, navigation }: { route: any; naviga
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#EEE' },
-  title: { fontSize: 16, fontWeight: 'bold', width: '80%' },
+  title: {
+  fontSize: 16,
+  fontWeight: 'bold',
+  flexWrap: 'wrap',
+},
   card: { padding: 16, borderRadius: 10, borderWidth: 1, marginBottom: 16, elevation: 1 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
   studentName: { fontSize: 15, fontWeight: 'bold' },

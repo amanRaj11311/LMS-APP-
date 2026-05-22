@@ -1,483 +1,450 @@
 import React, { useState, useCallback } from 'react';
-import { 
-  View, 
-  Text, 
-  TextInput, 
-  TouchableOpacity, 
-  FlatList, 
-  StyleSheet, 
-  ActivityIndicator, 
-  Alert, 
-  Switch, 
-  Keyboard,
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  FlatList,
+  StyleSheet,
+  Alert,
+  Switch,
+  Modal,
   ScrollView,
-  KeyboardAvoidingView,
+  Linking,
+  RefreshControl,
+  ActivityIndicator,
   Platform,
-  Linking
 } from 'react-native';
+
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Picker } from '@react-native-picker/picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import { pick } from '@react-native-documents/picker';
 
-// Core Themes and Target Network Service Definitions
 import { useTheme } from '../../theme/ThemeContext';
-import { studyMaterialApi, StudyMaterial, CreateMaterialPayload } from '../../api/studyMaterialApi';
-import { batchApi, Batch } from '../../api/batchApi';
-import { subjectApi, Subject } from '../../api/subjectApi';
+import { studyMaterialApi } from '../../api/studyMaterialApi';
+import { batchApi } from '../../api/batchApi';
+import { subjectApi } from '../../api/subjectApi';
 
-const StudyMaterialScreen = ({ navigation }: { navigation: any }) => {
+const StudyMaterialScreen = () => {
   const { theme } = useTheme();
 
-  // 🌟 DYNAMIC ROLE TRACKER
   const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'teacher' | 'student'>('student');
-  const [currentUserId, setCurrentUserId] = useState<string>('');
 
-  // Relational Memory Buffers
-  const [materialsFeed, setMaterialsFeed] = useState<StudyMaterial[]>([]);
-  const [subjectsFeed, setSubjectsFeed] = useState<Subject[]>([]);
-  const [batchesFeed, setBatchesFeed] = useState<Batch[]>([]);
+  const [materials, setMaterials] = useState<any[]>([]);
+  const [subjects, setSubjects] = useState<any[]>([]);
+  const [batches, setBatches] = useState<any[]>([]);
 
-  // Telemetry Filtering Inputs
-  const [filterSubjectId, setFilterSubjectId] = useState<string>('');
-  const [filterType, setFilterType] = useState<string>('');
-
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-
-  // Core Form Input Registers
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isModalVisible, setIsModalVisible] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [titleInput, setTitleInput] = useState<string>('');
-  const [descInput, setDescInput] = useState<string>('');
-  const [selectedSubjectId, setSelectedSubjectId] = useState<string>('');
-  const [selectedBatchId, setSelectedBatchId] = useState<string>('');
-  const [resourceType, setResourceType] = useState<'notes' | 'video' | 'pdf' | 'link' | 'presentation' | 'other'>('notes');
-  const [fileUrlInput, setFileUrlInput] = useState<string>('');
-  const [tagsInput, setTagsInput] = useState<string>('');
-  const [isPublicState, setIsPublicState] = useState<boolean>(false);
-  const [isActiveState, setIsActiveState] = useState<boolean>(true);
 
-  // 🌟 ROLE-BASED SMART FETCHING
-  const fetchLibraryDependencies = useCallback(async (roleOverride?: 'admin' | 'teacher' | 'student') => {
-    setIsLoading(true);
+  // Form States
+  const [title, setTitle] = useState('');
+  const [subjectId, setSubjectId] = useState('');
+  const [selectedBatchIds, setSelectedBatchIds] = useState<string[]>([]);
+  const [type, setType] = useState('pdf');
+  const [fileUrl, setFileUrl] = useState('');
+  const [description, setDescription] = useState('');
+  const [isPublic, setIsPublic] = useState(false);
+  
+  // Single file state to prevent backend crash
+  const [selectedFile, setSelectedFile] = useState<any>(null);
+
+  const resetForm = () => {
+    setEditingId(null);
+    setTitle('');
+    setSubjectId('');
+    setSelectedBatchIds([]);
+    setType('pdf');
+    setFileUrl('');
+    setDescription('');
+    setIsPublic(false);
+    setSelectedFile(null);
+  };
+
+  const fetchData = async () => {
     try {
-      const targetRole = roleOverride || currentUserRole;
-      
-      const queryParams: any = {};
-      if (filterSubjectId) queryParams.subjectId = filterSubjectId;
-      if (filterType) queryParams.type = filterType;
+      const stored = await AsyncStorage.getItem('user_data');
+      const user = stored ? JSON.parse(stored) : {};
+      setCurrentUserRole(user.role);
 
-      // Agar Student hai toh apna route fetch karega, warna Admin/Teacher apna route
-      const [matsRes, subsRes, batchesRes] = await Promise.all([
-        targetRole === 'student' ? studyMaterialApi.getMyMaterials(queryParams) : studyMaterialApi.getAll(queryParams),
-        subjectApi.getAll(),
-        targetRole !== 'student' ? batchApi.getAll() : Promise.resolve([]),
-      ]);
+      // Fetch Materials
+      const mRes = user.role === 'student'
+        ? await studyMaterialApi.getMyMaterials()
+        : await studyMaterialApi.getAll();
 
-      // Handle Data Mapping
-      if (matsRes?.success) {
-        setMaterialsFeed(Array.isArray(matsRes.data) ? matsRes.data : []);
-      } else {
-        setMaterialsFeed([]);
+      setMaterials(mRes.data || []);
+
+      // Fetch Dependencies only if not student
+      if (user.role !== 'student') {
+        const [sRes, bRes] = await Promise.all([
+          subjectApi.getAll(),
+          batchApi.getAll(),
+        ]);
+        setSubjects(sRes.data || []);
+        setBatches(bRes.data || []);
       }
-
-      if (subsRes) {
-        const rawSubs = Array.isArray(subsRes) ? subsRes : (subsRes.data || []);
-        setSubjectsFeed(Array.isArray(rawSubs) ? rawSubs : []);
-      }
-
-      if (batchesRes) {
-        const rawBatches = Array.isArray(batchesRes) ? batchesRes : (batchesRes.data || []);
-        setBatchesFeed(Array.isArray(rawBatches) ? rawBatches : []);
-      }
-    } catch (error: any) {
-      console.warn("Library Synchronization Extraction Exception:", error?.message);
-    } finally {
-      setIsLoading(false);
+    } catch (e) {
+      console.log('FETCH ERROR:', e);
     }
-  }, [currentUserRole, filterSubjectId, filterType]);
+  };
 
-  // Evaluate Runtime Permissions on Screen Load
   useFocusEffect(
     useCallback(() => {
-      let isMounted = true;
-      const verifyAndInitializeRuntimeState = async () => {
-        try {
-          const storedString = await AsyncStorage.getItem("user_data");
-          let evaluatedRole: 'admin' | 'teacher' | 'student' = 'student';
-          
-          if (storedString) {
-            const userObj = JSON.parse(storedString);
-            if (userObj?._id) setCurrentUserId(userObj._id);
-
-            if (userObj?.role) {
-              if (typeof userObj.role === 'string') evaluatedRole = userObj.role.trim().toLowerCase() as any;
-              else if (typeof userObj.role === 'object' && userObj.role.name) evaluatedRole = userObj.role.name.trim().toLowerCase() as any;
-            }
-            if (!['admin', 'teacher', 'student'].includes(evaluatedRole)) evaluatedRole = 'student'; 
-            if (isMounted) setCurrentUserRole(evaluatedRole);
-          }
-          if (isMounted) await fetchLibraryDependencies(evaluatedRole);
-        } catch (err) {
-          console.warn("Storage runtime evaluation error:", err);
-          if (isMounted) setIsLoading(false);
-        }
-      };
-
-      verifyAndInitializeRuntimeState();
-      return () => { isMounted = false; };
-    }, [filterSubjectId, filterType, fetchLibraryDependencies])
+      setIsLoading(true);
+      fetchData().finally(() => setIsLoading(false));
+    }, [])
   );
 
-  const resetFormState = () => {
-    setEditingId(null);
-    setTitleInput('');
-    setDescInput('');
-    setSelectedSubjectId('');
-    setSelectedBatchId('');
-    setResourceType('notes');
-    setFileUrlInput('');
-    setTagsInput('');
-    setIsPublicState(false);
-    setIsActiveState(true);
-    Keyboard.dismiss();
+  const onRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchData();
+    setIsRefreshing(false);
   };
 
-  // 🌟 FIX: EDIT FUNCTION NOW MAPS ALL REQUIRED FIELDS CORRECTLY
- const handleTriggerEdit = (item: StudyMaterial) => {
-    if (!item) return;
+  const handleEdit = (item: any) => {
     setEditingId(item._id);
-    setTitleInput(item.title || '');
-    setDescInput(item.description || '');
-    
-    const subId = typeof item.subjectId === 'object' && item.subjectId ? item.subjectId._id : (item.subjectId || '');
-    const bId = typeof item.batchId === 'object' && item.batchId ? item.batchId._id : (item.batchId || '');
-    const [originalSubjectId, setOriginalSubjectId] = useState<string>('');
-  const [originalBatchId, setOriginalBatchId] = useState<string>('');
-    
-    setSelectedSubjectId(subId);
-    setSelectedBatchId(bId);
-
-    // 🌟 NAYI LINES ADD KAREIN
-    setOriginalSubjectId(subId);
-    setOriginalBatchId(bId);
-    
-    setResourceType(item.type || 'notes');
-    setFileUrlInput(item.fileUrl || '');
-    setIsPublicState(item.isPublic || false);
-    setIsActiveState(item.isActive !== undefined ? item.isActive : true);
-    
-    if (Array.isArray(item.tags)) setTagsInput(item.tags.join(', '));
-    else setTagsInput('');
-
-    MasterScrollRef?.scrollTo({ y: 0, animated: true });
+    setTitle(item.title);
+    setSubjectId(item.subjectId?._id || '');
+    setSelectedBatchIds(item.batchIds?.map((b: any) => b._id) || []);
+    setType(item.type);
+    setFileUrl(item.fileUrl || '');
+    setDescription(item.description || '');
+    setIsPublic(item.isPublic || false);
+    setSelectedFile(null);
+    setIsModalVisible(true);
   };
-  let MasterScrollRef: ScrollView | null = null;
 
-  const handleSaveOrUpdate = async () => {
-    const cleanTitle = titleInput.trim();
-    const cleanUrl = fileUrlInput.trim();
-
-    if (!cleanTitle || !selectedSubjectId || !cleanUrl) {
-      Alert.alert('Missing Information', 'Please provide the Document Title, select a Subject, and enter the File URL before saving.');
-      return;
-    }
-
-    // 🌟 YAHAN NAYA VALIDATION ADD KIYA HAI
-    if (editingId) {
-      if (selectedSubjectId !== originalSubjectId || selectedBatchId !== originalBatchId) {
-        Alert.alert(
-          'Action Restricted', 
-          'Aap edit karte waqt Subject ya Batch change nahi kar sakte. Agar galat batch mein upload ho gaya hai, toh isey Delete karke naya material banayein.'
-        );
-        return; // Ye code ko yahi rok dega aur API call nahi hogi
-      }
-    }
-
-    setIsSubmitting(true);
+  const handleUpload = async () => {
     try {
-      const tagsArray = tagsInput.trim() ? tagsInput.split(',').map(s => s.trim()).filter(Boolean) : undefined;
-      
-      const payload: CreateMaterialPayload = {
-        title: cleanTitle,
-        description: descInput.trim() || undefined,
-        subjectId: selectedSubjectId,
-        batchId: selectedBatchId || undefined,
-        type: resourceType,
-        fileUrl: cleanUrl,
-        isPublic: isPublicState,
-        tags: tagsArray,
+      // Dynamic Picker Types
+      let docTypes = ['*/*'];
+      if (type === 'pdf') docTypes = ['application/pdf'];
+      else if (type === 'video') docTypes = ['video/*'];
+      else if (type === 'presentation') docTypes = ['application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'];
+
+      const res = await pick({
+        type: docTypes,
+        allowMultiSelection: false, // Restricted to single file as per DB schema
+      });
+
+      setSelectedFile(res[0]);
+    } catch (err: any) {
+      if (err.code !== 'DOCUMENT_PICKER_CANCELED') console.log('PICK ERROR:', err);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!title || !subjectId) {
+      return Alert.alert('Required', 'Please fill title and subject');
+    }
+
+    try {
+      let finalFileUrl = fileUrl;
+
+      // Only upload if a new file is selected and type is NOT link
+      if (type !== 'link' && selectedFile) {
+        const formData = new FormData();
+        formData.append('file', { // 'file' key to match standard backend single upload
+          uri: Platform.OS === 'ios' ? selectedFile.uri.replace('file://', '') : selectedFile.uri,
+          name: selectedFile.name || `file_${Date.now()}`,
+          type: selectedFile.type || 'application/octet-stream',
+        } as any);
+
+        const uploadRes = await studyMaterialApi.uploadStudyMaterialFiles(formData);
+        const resData = uploadRes.data || uploadRes;
+
+        // Robust URL Extraction from Response
+        if (resData.fileUrl) finalFileUrl = resData.fileUrl;
+        else if (resData.url) finalFileUrl = resData.url;
+        else if (Array.isArray(resData.fileUrls)) finalFileUrl = resData.fileUrls[0];
+        else if (Array.isArray(resData.urls)) finalFileUrl = resData.urls[0];
+        else if (typeof resData === 'string') finalFileUrl = resData;
+
+        if (!finalFileUrl) {
+          return Alert.alert('Upload Failed', 'Failed to retrieve file URL from server');
+        }
+      }
+
+      if (!finalFileUrl && type !== 'link') {
+        return Alert.alert("Upload Required", "Please upload a file");
+      }
+
+      const payload = {
+        title,
+        subjectId,
+        batchIds: selectedBatchIds,
+        type,
+        fileUrl: finalFileUrl,
+        description,
+        isPublic,
       };
 
-      let res;
       if (editingId) {
-        res = await studyMaterialApi.update(editingId, { ...payload, isActive: isActiveState });
+        await studyMaterialApi.update(editingId, payload);
       } else {
-        res = await studyMaterialApi.create(payload);
+        await studyMaterialApi.create(payload as any);
       }
 
-      if (res?.success) {
-        Alert.alert('Success!', editingId ? 'Material updated successfully.' : 'Study material uploaded successfully.');
-        resetFormState();
-        fetchLibraryDependencies();
-      } else {
-        Alert.alert('Action Failed', res?.message || 'Could not save the material. Please check your permissions.');
-      }
-    } catch (error: any) {
-      const errorMsg = error.response?.data?.message || 'Unable to connect to the server. Please try again.';
-      Alert.alert('Oops! Something went wrong', errorMsg);
-    } finally {
-      setIsSubmitting(false);
+      Alert.alert('Success', editingId ? 'Material updated successfully' : 'Material added successfully');
+      setIsModalVisible(false);
+      resetForm();
+      fetchData();
+    } catch (err: any) {
+      Alert.alert('Error', err?.response?.data?.message || 'Failed to save material');
     }
   };
 
-  const handleDeleteMaterial = (id: string) => {
-    Alert.alert(
-      'Confirm Deletion',
-      'Are you sure you want to permanently delete this study material?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Yes, Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const res = await studyMaterialApi.delete(id);
-              if (res?.success) {
-                // Success
-                Alert.alert('Deleted', 'Material has been removed successfully.');
-                if (editingId === id) resetFormState();
-                fetchLibraryDependencies();
-              } else {
-                // Backend Rejection
-                Alert.alert('Deletion Failed', res?.message || 'You do not have permission to delete this item.');
-              }
-            } catch (error: any) {
-              // Network Error
-              const errorMsg = error.response?.data?.message || 'Failed to connect to the server. Please try again.';
-              Alert.alert('Error', errorMsg);
-            }
+  const handleDelete = async (id: string) => {
+    Alert.alert('Delete', 'Are you sure you want to delete this material?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await studyMaterialApi.delete(id);
+            Alert.alert('Success', 'Material deleted successfully');
+            fetchData();
+          } catch (err: any) {
+            Alert.alert('Error', 'Failed to delete material');
           }
-        }
-      ]
-    );
+        },
+      },
+    ]);
   };
 
-  const renderMaterialLibraryCard = ({ item }: { item: StudyMaterial }) => {
-    if (!item) return null;
-    
-    // Evaluate display conditions explicitly matching runtime logic structures
-    const uploaderId = typeof item.uploadedBy === 'object' ? item.uploadedBy?._id : (item.uploadedBy || item.createdBy);
-    const canManage = currentUserRole === 'admin' || (currentUserRole === 'teacher' && uploaderId === currentUserId);
-    
-    const subObj = typeof item.subjectId === 'object' && item.subjectId ? item.subjectId : null;
-    const subjectName = subObj ? `${subObj.name} (${subObj.code || ''})` : 'System Subject';
-    
-    let dateStr = 'N/A';
-    if (typeof item.createdAt === 'string') dateStr = item.createdAt.split('T')[0];
-
-    const isPubColor = item.isPublic ? '#10B981' : '#F59E0B';
-
+  if (isLoading) {
     return (
-      <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <View style={styles.cardHeaderRow}>
-          <Text style={[styles.cardTitleText, { color: theme.text }]} numberOfLines={1}>{item.title}</Text>
-          <View style={[styles.statusBadge, { backgroundColor: theme.primary }]}>
-            <Text style={styles.badgeText}>{item.type.toUpperCase()}</Text>
-          </View>
-        </View>
-
-        <Text style={{ fontSize: 12, color: theme.text, fontWeight: '500', marginBottom: 2 }}>Topic Context: {subjectName}</Text>
-        <Text style={{ fontSize: 12, color: theme.subText, marginBottom: 8 }} numberOfLines={2}>Brief: {item.description || 'No description assigned.'}</Text>
-        
-        <View style={styles.metadataGrid}>
-          <Text style={{ fontSize: 11, color: theme.subText }}>Uploaded: {dateStr}</Text>
-          <Text style={{ fontSize: 11, color: isPubColor, fontWeight: 'bold' }}>{item.isPublic ? 'PUBLIC ACCESS' : 'RESTRICTED'}</Text>
-        </View>
-
-        <View style={styles.actionConsoleRow}>
-          <TouchableOpacity 
-            onPress={() => Linking.openURL(item.fileUrl)} 
-            style={[styles.launchBtn, { borderColor: '#0288D1', backgroundColor: 'rgba(2, 136, 209, 0.05)' }]}
-          >
-            <MaterialIcons name="cloud-download" size={14} color="#0288D1" style={{ marginRight: 4 }} />
-            <Text style={{ color: '#0288D1', fontWeight: 'bold', fontSize: 12 }}>Access Resource File</Text>
-          </TouchableOpacity>
-
-          {/* EDIT AND DELETE VISIBLE ONLY TO ADMIN OR UPLOADING TEACHER */}
-          {canManage && (
-            <View style={{ flexDirection: 'row' }}>
-              <TouchableOpacity onPress={() => handleTriggerEdit(item)} style={{ paddingHorizontal: 12, paddingVertical: 6 }}>
-                <Text style={{ color: theme.primary, fontWeight: 'bold', fontSize: 12 }}>Edit</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => handleDeleteMaterial(item._id)} style={{ paddingLeft: 12, paddingVertical: 6 }}>
-                <Text style={{ color: '#EF4444', fontWeight: 'bold', fontSize: 12 }}>Delete</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-      </View>
+      <SafeAreaView style={[styles.loaderContainer, { backgroundColor: theme.background }]}>
+        <ActivityIndicator size="large" color={theme.primary} />
+      </SafeAreaView>
     );
-  };
-
-  const safeMaterials = Array.isArray(materialsFeed) ? materialsFeed : [];
-  const safeSubjects = Array.isArray(subjectsFeed) ? subjectsFeed : [];
-  const safeBatches = Array.isArray(batchesFeed) ? batchesFeed : [];
-  const topPreviewList = safeMaterials.slice(0, 3);
+  }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['bottom']}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView ref={(ref) => { MasterScrollRef = ref; }} contentContainerStyle={{ padding: 16 }} showsVerticalScrollIndicator={true} keyboardShouldPersistTaps="handled">
-          
-          {/* UPLOAD FORM (RESTRICTED TO ADMINS & TEACHERS) */}
-          {currentUserRole !== 'student' && (
-            <View style={[styles.formWrapperBox, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-              <View style={styles.formHeaderRow}>
-                <Text style={[styles.formTitle, { color: theme.text }]}>{editingId ? 'Modify Material' : 'Upload Study Material'}</Text>
-                {editingId && (
-                  <TouchableOpacity onPress={resetFormState}>
-                    <Text style={styles.cancelText}>Cancel Edit</Text>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+      {/* HEADER */}
+      <View style={styles.header}>
+        <Text style={[styles.listHeader, { color: theme.text }]}>Study Materials</Text>
+        {currentUserRole !== 'student' && (
+          <TouchableOpacity
+            style={[styles.addBtn, { backgroundColor: theme.primary }]}
+            onPress={() => { resetForm(); setIsModalVisible(true); }}>
+            <Text style={{ color: '#FFF', fontWeight: 'bold' }}>+ Add Material</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* LIST */}
+      <FlatList
+        data={materials}
+        keyExtractor={(item) => item._id}
+        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={[theme.primary]} />}
+        ListEmptyComponent={() => (
+          <View style={styles.emptyContainer}>
+            <Text style={{ color: theme.subText }}>No study materials found</Text>
+          </View>
+        )}
+        renderItem={({ item }) => (
+          <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                <Text style={{ fontWeight: 'bold', fontSize: 16, color: theme.text }}>{item.title}</Text>
+                <View style={[styles.statusBadge, { backgroundColor: item.isActive ? '#10B981' : '#EF4444' }]}>
+                    <Text style={styles.statusText}>{item.isActive ? 'Active' : 'Inactive'}</Text>
+                </View>
+            </View>
+            <Text style={{ color: theme.subText, fontSize: 13, marginTop: 2 }}>Subject: {item.subjectId?.name || '-'}</Text>
+            <Text style={{ color: theme.subText, fontSize: 13, marginTop: 2 }}>
+              Batches: {item.batchIds?.map((b: any) => b.name).join(', ') || 'Public'}
+            </Text>
+            <Text style={{ color: theme.subText, fontSize: 13, marginTop: 2 }}>Visibility: {item.isPublic ? 'Public' : 'Batch Only'}</Text>
+
+            <View style={styles.actionRow}>
+              <TouchableOpacity onPress={() => { if (item.fileUrl) Linking.openURL(item.fileUrl); }}>
+                <Text style={{ color: '#10B981', fontWeight: 'bold' }}>Open {item.type === 'link' ? 'Link' : 'File'}</Text>
+              </TouchableOpacity>
+
+              {currentUserRole !== 'student' && (
+                <View style={{ flexDirection: 'row' }}>
+                  <TouchableOpacity onPress={() => handleEdit(item)} style={{ marginRight: 15 }}>
+                    <Text style={{ color: theme.primary, fontWeight: 'bold' }}>Edit</Text>
                   </TouchableOpacity>
-                )}
-              </View>
+                  <TouchableOpacity onPress={() => handleDelete(item._id)}>
+                    <Text style={{ color: '#EF4444', fontWeight: 'bold' }}>Delete</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          </View>
+        )}
+      />
 
-              <Text style={[styles.label, { color: theme.text }]}>Document Title</Text>
-              <TextInput style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="Chapter 3 Overview..." placeholderTextColor={theme.subText} value={titleInput} onChangeText={setTitleInput} />
+      {/* MODAL */}
+      <Modal visible={isModalVisible} animationType="slide" transparent={true}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.formTitle, { color: theme.text }]}>
+                {editingId ? 'Edit' : 'Add'} Study Material
+              </Text>
+              <TouchableOpacity onPress={() => { setIsModalVisible(false); resetForm(); }}>
+                <MaterialIcons name="close" size={24} color={theme.text} />
+              </TouchableOpacity>
+            </View>
 
+            <ScrollView contentContainerStyle={{ paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
+              {/* TITLE */}
+              <Text style={styles.label}>TITLE *</Text>
+              <TextInput
+                style={[styles.input, { borderColor: theme.border, color: theme.text }]}
+                value={title} onChangeText={setTitle} placeholder="Enter title" placeholderTextColor="#999"
+              />
+
+              {/* ROW: TYPE & SUBJECT */}
               <View style={styles.row}>
-                <View style={styles.halfInput}>
-                  <Text style={[styles.label, { color: theme.text }]}>Subject Mapping</Text>
-                  <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border }]}>
-                    <Picker selectedValue={selectedSubjectId} onValueChange={(v) => setSelectedSubjectId(v)} style={{ color: theme.text }} dropdownIconColor={theme.primary}>
-                      <Picker.Item label="-- Subject --" value="" color={theme.subText} />
-                      {safeSubjects.map(sub => <Picker.Item key={sub._id} label={sub.code || sub.name} value={sub._id} />)}
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>TYPE *</Text>
+                  <View style={[styles.pickerWrapper, { borderColor: theme.border }]}>
+                    <Picker
+                      selectedValue={type}
+                      onValueChange={(val) => {
+                          setType(val);
+                          setSelectedFile(null);
+                          setFileUrl('');
+                      }}>
+                      <Picker.Item label="PDF" value="pdf" />
+                      <Picker.Item label="Notes" value="notes" />
+                      <Picker.Item label="Video" value="video" />
+                      <Picker.Item label="Presentation" value="presentation" />
+                      <Picker.Item label="Link" value="link" />
+                      <Picker.Item label="Other" value="other" />
                     </Picker>
                   </View>
                 </View>
 
-                <View style={styles.halfInput}>
-                  <Text style={[styles.label, { color: theme.text }]}>Format Type</Text>
-                  <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border }]}>
-                    <Picker selectedValue={resourceType} onValueChange={(v) => setResourceType(v)} style={{ color: theme.text }} dropdownIconColor={theme.primary}>
-                      <Picker.Item label="PDF" value="pdf" /><Picker.Item label="Notes" value="notes" /><Picker.Item label="Video" value="video" /><Picker.Item label="Link" value="link" /><Picker.Item label="Presentation" value="presentation" /><Picker.Item label="Other" value="other" />
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <Text style={styles.label}>SUBJECT *</Text>
+                  <View style={[styles.pickerWrapper, { borderColor: theme.border }]}>
+                    <Picker selectedValue={subjectId} onValueChange={setSubjectId}>
+                      <Picker.Item label="Select" value="" />
+                      {subjects.map((s: any) => (
+                        <Picker.Item key={s._id} label={s.name} value={s._id} />
+                      ))}
                     </Picker>
                   </View>
                 </View>
               </View>
 
-              <Text style={[styles.label, { color: theme.text }]}>Cloud Storage Payload URL Base</Text>
-              <TextInput style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="https://storage.engine.com/file..." placeholderTextColor={theme.subText} value={fileUrlInput} onChangeText={setFileUrlInput} autoCapitalize="none" />
+              {/* BATCHES */}
+              <Text style={styles.label}>BATCHES</Text>
+              {batches.map((b: any) => (
+                <TouchableOpacity
+                  key={b._id} style={styles.checkboxRow}
+                  onPress={() => setSelectedBatchIds((prev) =>
+                      prev.includes(b._id) ? prev.filter((id) => id !== b._id) : [...prev, b._id]
+                  )}>
+                  <MaterialIcons name={selectedBatchIds.includes(b._id) ? 'check-box' : 'check-box-outline-blank'} size={24} color={theme.primary} />
+                  <Text style={{ marginLeft: 10, color: theme.text }}>{b.name}</Text>
+                </TouchableOpacity>
+              ))}
 
-              <Text style={[styles.label, { color: theme.text }]}>Target Deployment Batch (Optional)</Text>
-              <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border }]}>
-                <Picker selectedValue={selectedBatchId} onValueChange={(v) => setSelectedBatchId(v)} style={{ color: theme.text }} dropdownIconColor={theme.primary}>
-                  <Picker.Item label="-- All Batches (None Specific) --" value="" color={theme.subText} />
-                  {safeBatches.map(b => <Picker.Item key={b._id} label={b.name} value={b._id} />)}
-                </Picker>
+              {/* FILE / LINK INPUT */}
+              {type === 'link' ? (
+                <>
+                  <Text style={styles.label}>URL / LINK *</Text>
+                  <TextInput
+                    style={[styles.input, { borderColor: theme.border, color: theme.text }]}
+                    value={fileUrl} onChangeText={setFileUrl} placeholder="https://..." placeholderTextColor="#999" autoCapitalize="none"
+                  />
+                </>
+              ) : (
+                <>
+                  <Text style={styles.label}>UPLOAD FILE (1 File) *</Text>
+                  {selectedFile ? (
+                    <View style={[styles.fileRow, { borderColor: theme.border, backgroundColor: theme.background }]}>
+                       <Text numberOfLines={1} style={{ flex: 1, color: theme.text, fontSize: 13 }}>{selectedFile.name}</Text>
+                       <TouchableOpacity onPress={() => setSelectedFile(null)}>
+                          <MaterialIcons name="cancel" size={22} color="#EF4444" />
+                       </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <TouchableOpacity style={[styles.uploadBox, { borderColor: theme.border }]} onPress={handleUpload}>
+                      <MaterialIcons name="cloud-upload" size={30} color={theme.primary} />
+                      <Text style={{ textAlign: 'center', marginTop: 10, color: theme.text }}>Click to select file</Text>
+                    </TouchableOpacity>
+                  )}
+                  {editingId && fileUrl && !selectedFile && (
+                      <Text style={{color: theme.primary, fontSize: 11, marginBottom: 10}}>* Note: Existing file will be kept if no new file is selected.</Text>
+                  )}
+                </>
+              )}
+
+              {/* DESCRIPTION */}
+              <Text style={styles.label}>DESCRIPTION</Text>
+              <TextInput
+                style={[styles.input, { borderColor: theme.border, color: theme.text, height: 80, textAlignVertical: 'top' }]}
+                value={description} onChangeText={setDescription} multiline placeholder="Enter description" placeholderTextColor="#999"
+              />
+
+              {/* PUBLIC */}
+              <View style={styles.switchRow}>
+                <Text style={{ fontWeight: 'bold', color: theme.text }}>MAKE PUBLIC</Text>
+                <Switch value={isPublic} onValueChange={setIsPublic} />
               </View>
 
-              <Text style={[styles.label, { color: theme.text }]}>Description Notes</Text>
-              <TextInput style={[styles.input, { height: 50, backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="Provide brief context..." placeholderTextColor={theme.subText} value={descInput} onChangeText={setDescInput} multiline />
+              {/* ACTION BUTTONS */}
+              <View style={{flexDirection: 'row', justifyContent: 'space-between', marginTop: 10}}>
+                  <TouchableOpacity
+                    style={[styles.cancelBtn, { borderColor: theme.border }]}
+                    onPress={() => { setIsModalVisible(false); resetForm(); }}>
+                    <Text style={{color: theme.text, fontWeight: 'bold', fontSize: 15}}>Cancel</Text>
+                  </TouchableOpacity>
 
-              <View style={styles.toggleCluster}>
-                <View style={styles.switchRow}>
-                  <Text style={{ color: theme.text, fontWeight: '500', fontSize: 12 }}>Make Public (Visible to all students)</Text>
-                  <Switch value={isPublicState} onValueChange={setIsPublicState} thumbColor={theme.primary} />
-                </View>
-                {editingId && (
-                  <View style={styles.switchRow}>
-                    <Text style={{ color: theme.text, fontWeight: '500', fontSize: 12 }}>Active Status</Text>
-                    <Switch value={isActiveState} onValueChange={setIsActiveState} thumbColor={theme.primary} />
-                  </View>
-                )}
+                  <TouchableOpacity
+                    style={[styles.saveBtn, { backgroundColor: theme.primary }]}
+                    onPress={handleSave}>
+                    <Text style={styles.btnText}>{editingId ? 'Save Changes' : 'Add Material'}</Text>
+                  </TouchableOpacity>
               </View>
-
-              <TouchableOpacity style={[styles.mainButton, { backgroundColor: theme.primary }]} onPress={handleSaveOrUpdate} disabled={isSubmitting}>
-                {isSubmitting ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnText}>{editingId ? 'Update Master Properties' : 'Upload Resource Data'}</Text>}
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* TELEMETRY FILTER CONTROLS */}
-          <View style={[styles.filterBarBox, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            <Text style={{ fontSize: 12, fontWeight: 'bold', color: theme.primary, marginBottom: 6 }}>Evaluate Library Catalog</Text>
-            <View style={styles.row}>
-              <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border, flex: 0.48, height: 38 }]}>
-                <Picker selectedValue={filterSubjectId} onValueChange={(v) => setFilterSubjectId(v)} style={{ color: theme.text }} dropdownIconColor={theme.primary}>
-                  <Picker.Item label="-- Sub All --" value="" color={theme.subText} />
-                  {safeSubjects.map(sub => <Picker.Item key={sub._id} label={sub.code || sub.name} value={sub._id} />)}
-                </Picker>
-              </View>
-              <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border, flex: 0.48, height: 38 }]}>
-                <Picker selectedValue={filterType} onValueChange={(v) => setFilterType(v)} style={{ color: theme.text }} dropdownIconColor={theme.primary}>
-                  <Picker.Item label="-- Type All --" value="" color={theme.subText} /><Picker.Item label="PDF" value="pdf" /><Picker.Item label="Video" value="video" /><Picker.Item label="Notes" value="notes" /><Picker.Item label="Link" value="link" /><Picker.Item label="Presentation" value="presentation" />
-                </Picker>
-              </View>
-            </View>
+            </ScrollView>
           </View>
-
-          {/* OUTPUT PREVIEW CONTAINER */}
-          <View style={styles.miniRegistryBlock}>
-            <Text style={[styles.registryHeading, { color: theme.text }]}>Current Digital Library (Top 3)</Text>
-
-            {isLoading ? (
-              <ActivityIndicator size="small" color={theme.primary} style={{ marginVertical: 20 }} />
-            ) : topPreviewList.length > 0 ? (
-              topPreviewList.map((item, idx) => <View key={idx}>{renderMaterialLibraryCard({ item })}</View>)
-            ) : (
-              <Text style={[styles.emptyText, { color: theme.subText }]}>No operational material files found.</Text>
-            )}
-
-            {safeMaterials.length > 0 && (
-              <TouchableOpacity 
-                style={[styles.viewAllBtn, { borderColor: theme.primary }]}
-                onPress={() => navigation.navigate('AllMaterialsFeed', { materialsList: safeMaterials, currentUserRole, currentUserId })}
-              >
-                <Text style={{ color: theme.primary, fontWeight: 'bold', fontSize: 13 }}>
-                  Explore Absolute Digital Catalog ({safeMaterials.length} Items)
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  formWrapperBox: { padding: 16, borderRadius: 11, borderWidth: 1, marginBottom: 14 },
-  formHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 },
+  listHeader: { fontSize: 20, fontWeight: 'bold' },
+  addBtn: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 },
+  card: { padding: 16, marginHorizontal: 12, marginBottom: 12, borderRadius: 10, borderWidth: 1 },
+  actionRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, borderTopWidth: 0.5, paddingTop: 10 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center' },
+  modalContent: { margin: 20, borderRadius: 12, padding: 20, maxHeight: '90%' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
   formTitle: { fontSize: 18, fontWeight: 'bold' },
-  cancelText: { color: '#D32F2F', fontWeight: '600', fontSize: 14 },
-  label: { fontSize: 12, fontWeight: '600', marginBottom: 4 },
-  input: { height: 44, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, marginBottom: 10 },
-  row: { flexDirection: 'row', justifyContent: 'space-between' },
-  halfInput: { width: '48%' },
-  pickerWrapper: { height: 46, borderWidth: 1, borderRadius: 8, justifyContent: 'center', overflow: 'hidden', marginBottom: 10 },
-  toggleCluster: { marginVertical: 4 },
-  switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  mainButton: { height: 48, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginTop: 8 },
-  btnText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
-
-  filterBarBox: { padding: 10, borderRadius: 8, borderWidth: 0.5, marginBottom: 16 },
-  miniRegistryBlock: { marginTop: 4 },
-  registryHeading: { fontSize: 16, fontWeight: 'bold', marginBottom: 12 },
-  card: { padding: 14, borderRadius: 10, borderWidth: 1, marginBottom: 12 },
-  cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
-  cardTitleText: { fontSize: 15, fontWeight: 'bold', flex: 1, marginRight: 8 },
-  statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
-  badgeText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
-  metadataGrid: { flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 0.5, borderTopColor: '#EEE', paddingTop: 8, marginTop: 4 },
-  actionConsoleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 },
-  launchBtn: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
-  
-  viewAllBtn: { borderWidth: 1, borderRadius: 8, paddingVertical: 10, alignItems: 'center', marginTop: 8, backgroundColor: 'rgba(2, 136, 209, 0.05)' },
-  emptyText: { textAlign: 'center', fontSize: 13, marginVertical: 12 },
+  input: { borderWidth: 1, borderRadius: 8, padding: 12, marginBottom: 15 },
+  pickerWrapper: { borderWidth: 1, borderRadius: 8, marginBottom: 15, overflow: 'hidden' },
+  uploadBox: { height: 90, borderWidth: 1, borderStyle: 'dashed', justifyContent: 'center', alignItems: 'center', marginBottom: 15, borderRadius: 8, padding: 10 },
+  fileRow: { flexDirection: 'row', alignItems: 'center', padding: 12, borderWidth: 1, borderRadius: 8, marginBottom: 10 },
+  checkboxRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  saveBtn: { flex: 1, padding: 15, borderRadius: 8, alignItems: 'center', marginLeft: 5 },
+  cancelBtn: { flex: 1, padding: 15, borderRadius: 8, alignItems: 'center', borderWidth: 1, marginRight: 5 },
+  btnText: { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
+  label: { fontSize: 11, fontWeight: 'bold', marginBottom: 6, color: '#555' },
+  switchRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15, alignItems: 'center' },
+  row: { flexDirection: 'row' },
+  emptyContainer: { alignItems: 'center', marginTop: 50 },
+  statusBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  statusText: { fontSize: 10, color: '#FFF', fontWeight: 'bold' }
 });
 
 export default StudyMaterialScreen;

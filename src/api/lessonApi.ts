@@ -52,5 +52,12 @@ export const lessonApi = {
   delete: async (id: string) => {
     const response = await apiClient.delete(`/api/lessons/${id}`);
     return response.data;
-  }
+    
+  },
+  uploadLessonFiles: async (formData: FormData) => {
+    const response = await apiClient.post('/api/upload/lesson', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
 };

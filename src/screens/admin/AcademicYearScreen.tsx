@@ -300,7 +300,7 @@ const AcademicYearScreen = () => {
         </View>
 
         {/* INPUT: START DATE STRING */}
-        <Text style={[styles.inputLabel, { color: theme.text }]}>Start Metric Boundary (YYYY-MM-DD)</Text>
+        <Text style={[styles.inputLabel, { color: theme.text }]}>Start date (YYYY-MM-DD)</Text>
         <TextInput
           style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]}
           placeholder="2026-05-12"
@@ -313,7 +313,7 @@ const AcademicYearScreen = () => {
         />
 
         {/* INPUT: END DATE STRING */}
-        <Text style={[styles.inputLabel, { color: theme.text }]}>End Metric Boundary (YYYY-MM-DD)</Text>
+        <Text style={[styles.inputLabel, { color: theme.text }]}>End Date (YYYY-MM-DD)</Text>
         <TextInput
           style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]}
           placeholder="2027-05-12"
@@ -327,7 +327,7 @@ const AcademicYearScreen = () => {
 
         {/* SYSTEM STATUS PARAMETERS */}
         <View style={styles.switchRow}>
-          <Text style={{ color: theme.text, fontWeight: '500' }}>Enforce Active System Target</Text>
+          <Text style={{ color: theme.text, fontWeight: '500' }}>Set as Current Year</Text>
           <Switch value={isCurrent} onValueChange={setIsCurrent} thumbColor={theme.primary} />
         </View>
 
@@ -347,14 +347,14 @@ const AcademicYearScreen = () => {
             <ActivityIndicator color="#FFF" />
           ) : (
             <Text style={styles.btnText}>
-              {editingId ? 'Commit Record Update' : 'Commit Configuration Setup'}
+              {editingId ? 'Commit Record Update' : 'Save'}
             </Text>
           )}
         </TouchableOpacity>
       </View>
 
       {/* RENDERED REGISTRY ENGINE */}
-      <Text style={[styles.listHeader, { color: theme.text }]}>Mapped Registry Profiles</Text>
+      <Text style={[styles.listHeader, { color: theme.text }]}>Acad</Text>
 
       {isLoading ? (
         <ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 40 }} />

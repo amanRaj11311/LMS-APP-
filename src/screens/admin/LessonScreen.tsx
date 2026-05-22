@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -10,15 +10,17 @@ import {
   Alert, 
   Switch, 
   Keyboard,
-  ScrollView,
-  KeyboardAvoidingView,
   Platform,
-  Linking
+  Linking,
+  Modal,
+  ScrollView
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Picker } from '@react-native-picker/picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
+import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import { pick } from '@react-native-documents/picker'; // 🌟 Required for file upload
 
 // Themes and Upstream Core API Dependencies
 import { useTheme } from '../../theme/ThemeContext';
@@ -26,72 +28,41 @@ import { lessonApi, Lesson, CreateLessonPayload } from '../../api/lessonApi';
 import { subjectApi, Subject } from '../../api/subjectApi';
 import { batchApi, Batch } from '../../api/batchApi';
 
-const LessonScreen = ({ navigation }: { navigation: any }) => {
+const LessonScreen = () => {
   const { theme } = useTheme();
 
   // 🌟 DYNAMIC IDENTITY TRACKING
-  const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'teacher' | 'student'>('student');
+  const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'teacher' | 'student' | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string>('');
 
-  // Workspace Array Arrays
+  // Workspace Array States
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [availableSubjects, setAvailableSubjects] = useState<Subject[]>([]);
   const [availableBatches, setAvailableBatches] = useState<Batch[]>([]);
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  // Active Output Variables
+  // 🌟 MODAL & FORM STATES
+  const [isModalVisible, setIsModalVisible] = useState<boolean>(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  
   const [title, setTitle] = useState<string>('');
-  const [selectedSubjectId, setSelectedSubjectId] = useState<string>('');
   const [selectedBatchId, setSelectedBatchId] = useState<string>('');
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string>('');
   const [lessonType, setLessonType] = useState<'lecture' | 'lab' | 'tutorial' | 'seminar'>('lecture');
   
-  // Clean Form Interface Inputs
-  const [inputDate, setInputDate] = useState<string>('2026-05-15');
-  const [inputTime, setInputTime] = useState<string>('09:30');
-
+  const [inputDate, setInputDate] = useState<string>('');
+  const [inputTime, setInputTime] = useState<string>('');
   const [durationText, setDurationText] = useState<string>('60');
   const [contentText, setContentText] = useState<string>('');
-  const [attachmentsText, setAttachmentsText] = useState<string>(''); 
   const [meetingLinkText, setMeetingLinkText] = useState<string>('');
   const [isActive, setIsActive] = useState<boolean>(true);
 
-  // 🌟 STRICT API RESOLUTION BASED ON ROLE
-  const fetchOperationalWorkspaceAssets = useCallback(async (roleOverride?: 'admin' | 'teacher' | 'student') => {
-    setIsLoading(true);
-    try {
-      const targetRole = roleOverride || currentUserRole;
+  // 🌟 FILE UPLOAD STATE
+  const [lessonFiles, setLessonFiles] = useState<any[]>([]);
 
-      const [lessonsRes, subjectsRes, batchesRes] = await Promise.all([
-        targetRole === 'student' ? lessonApi.getMyLessons() : lessonApi.getAll(),
-        subjectApi.getAll(),
-        targetRole !== 'student' ? (targetRole === 'teacher' ? batchApi.getMyBatches() : batchApi.getAll()) : Promise.resolve([]),
-      ]);
-
-      if (lessonsRes) {
-        const rawPayload = Array.isArray(lessonsRes) ? lessonsRes : (lessonsRes.data || lessonsRes.result || lessonsRes.lessons || []);
-        setLessons(Array.isArray(rawPayload) ? rawPayload : [rawPayload].filter(Boolean));
-      }
-
-      if (subjectsRes) {
-        const rawSubs = Array.isArray(subjectsRes) ? subjectsRes : (subjectsRes.data || subjectsRes.result || subjectsRes.subjects || []);
-        setAvailableSubjects(Array.isArray(rawSubs) ? rawSubs : []);
-      }
-
-      if (batchesRes) {
-        const rawBatches = Array.isArray(batchesRes) ? batchesRes : (batchesRes.data || batchesRes.result || batchesRes.batches || []);
-        setAvailableBatches(Array.isArray(rawBatches) ? rawBatches : []);
-      }
-    } catch (err: any) {
-      console.warn("Downstream System Fetch Catch Ex:", err?.message);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [currentUserRole]);
-
-  // 🌟 IDENTITY UNBOXING ON FOCUS
   useFocusEffect(
     useCallback(() => {
       let isMounted = true;
@@ -103,46 +74,83 @@ const LessonScreen = ({ navigation }: { navigation: any }) => {
           if (storedString) {
             const userObj = JSON.parse(storedString);
             if (userObj?._id) setCurrentUserId(userObj._id);
-
             if (userObj?.role) {
               if (typeof userObj.role === 'string') evaluatedRole = userObj.role.trim().toLowerCase() as any;
               else if (typeof userObj.role === 'object' && userObj.role.name) evaluatedRole = userObj.role.name.trim().toLowerCase() as any;
             }
             if (!['admin', 'teacher', 'student'].includes(evaluatedRole)) evaluatedRole = 'student'; 
-            
             if (isMounted) setCurrentUserRole(evaluatedRole);
           }
           if (isMounted) await fetchOperationalWorkspaceAssets(evaluatedRole);
         } catch (err) {
-          console.warn("Storage runtime evaluation error:", err);
           if (isMounted) setIsLoading(false);
         }
       };
-
       verifyAndInitializeRuntimeState();
       return () => { isMounted = false; };
-    }, [fetchOperationalWorkspaceAssets])
+    }, [])
   );
 
-  const resetFormState = () => {
+  const fetchOperationalWorkspaceAssets = async (roleOverride?: 'admin' | 'teacher' | 'student') => {
+    setIsLoading(true);
+    try {
+      const targetRole = roleOverride || currentUserRole;
+      const [lessonsRes, subjectsRes, batchesRes] = await Promise.all([
+        targetRole === 'student' ? lessonApi.getMyLessons() : lessonApi.getAll(),
+        subjectApi.getAll(),
+        targetRole !== 'student' ? (targetRole === 'teacher' ? batchApi.getMyBatches() : batchApi.getAll()) : Promise.resolve([]),
+      ]);
+
+      if (lessonsRes?.success) setLessons(lessonsRes.data || []);
+      if (subjectsRes?.success) setAvailableSubjects(subjectsRes.data || []);
+      if (batchesRes?.success) setAvailableBatches(batchesRes.data || []);
+    } catch (err: any) {
+      Alert.alert("Error", "Failed to load lessons data.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const closeAndResetModal = () => {
+    setIsModalVisible(false);
     setEditingId(null);
     setTitle('');
-    setSelectedSubjectId('');
     setSelectedBatchId('');
+    setSelectedSubjectId('');
     setLessonType('lecture');
-    setInputDate('2026-05-15');
-    setInputTime('09:30');
+    setInputDate('');
+    setInputTime('');
     setDurationText('60');
     setContentText('');
-    setAttachmentsText('');
     setMeetingLinkText('');
+    setLessonFiles([]);
     setIsActive(true);
     Keyboard.dismiss();
   };
 
+  // 🌟 FILE PICKER LOGIC (Max 5 files)
+  const handlePickFiles = async () => {
+   try {
+     const res = await pick({
+       allowMultiSelection: true,
+       type: ['*/*'],
+     });
+ 
+     if (res.length > 5) {
+       Alert.alert("Limit Exceeded", "You can only upload up to 5 files.");
+       setLessonFiles(res.slice(0, 5));
+     } else {
+       setLessonFiles(res);
+     }
+   } catch (err) {
+     console.log(err);
+     Alert.alert("Error", "Failed to pick documents");
+   }
+ };
+ 
+
   const handleTriggerEdit = (item: any) => {
     if (!item) return;
-    
     setEditingId(item._id);
     setTitle(item.title || '');
     setSelectedSubjectId(typeof item.subjectId === 'object' && item.subjectId ? item.subjectId._id : item.subjectId);
@@ -150,29 +158,21 @@ const LessonScreen = ({ navigation }: { navigation: any }) => {
     setLessonType(item.type || 'lecture');
     
     if (item.scheduledAt && typeof item.scheduledAt === 'string') {
-      try {
-        const parts = item.scheduledAt.split('T');
-        if (parts.length >= 2) {
-          setInputDate(parts[0]);
-          setInputTime(parts[1].substring(0, 5));
-        }
-      } catch (e) {
-        setInputDate('2026-05-15');
-        setInputTime('09:30');
+      const parts = item.scheduledAt.split('T');
+      if (parts.length >= 2) {
+        setInputDate(parts[0]);
+        setInputTime(parts[1].substring(0, 5));
       }
     }
 
     setDurationText(item.duration ? item.duration.toString() : '60');
     setContentText(item.content || '');
-    const arr = Array.isArray(item.attachments) ? item.attachments : [];
-    setAttachmentsText(arr.join(', '));
     setMeetingLinkText(item.meetingLink || '');
     setIsActive(item.isActive !== undefined ? item.isActive : true);
+    setLessonFiles([]); // Existing attachments are managed via backend, clearing local file picker state
     
-    MasterScrollRef?.scrollTo({ y: 0, animated: true });
+    setIsModalVisible(true);
   };
-
-  let MasterScrollRef: ScrollView | null = null;
 
   const handleSaveOrUpdate = async () => {
     const cleanTitle = title.trim();
@@ -181,37 +181,53 @@ const LessonScreen = ({ navigation }: { navigation: any }) => {
     const parsedDur = parseInt(durationText.trim(), 10);
 
     if (!cleanTitle || !selectedSubjectId || !selectedBatchId || !cleanDate || !cleanTime || isNaN(parsedDur)) {
-      Alert.alert('Validation Error', 'Title, Subject, Cohort assignment, Base Schedule Date/Time, and numeric Duration parameters required.');
+      Alert.alert('Missing Details', 'Title, Batch, Subject, Date, Time, and Duration are required.');
       return;
     }
 
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     const timeRegex = /^\d{2}:\d{2}$/;
     if (!dateRegex.test(cleanDate) || !timeRegex.test(cleanTime)) {
-      Alert.alert('Format Validation', 'Ensure Date matches YYYY-MM-DD and Time adheres to 24-Hour HH:MM.');
+      Alert.alert('Format Error', 'Date must be YYYY-MM-DD and Time must be HH:MM.');
       return;
     }
 
     setIsSubmitting(true);
     const formattedIsoTimestamp = `${cleanDate}T${cleanTime}:00.000Z`;
-
-    const attachmentsArray = attachmentsText.trim()
-      ? attachmentsText.split(',').map(s => s.trim()).filter(Boolean)
-      : undefined;
-
-    const payload: CreateLessonPayload = {
-      title: cleanTitle,
-      subjectId: selectedSubjectId,
-      batchId: selectedBatchId,
-      scheduledAt: formattedIsoTimestamp,
-      duration: parsedDur,
-      type: lessonType,
-      content: contentText.trim() || undefined,
-      attachments: attachmentsArray,
-      meetingLink: meetingLinkText.trim() || undefined,
-    };
+    let finalAttachmentUrls: string[] = [];
 
     try {
+      // 🌟 UPLOAD FILES FIRST IF ANY EXIST
+      if (lessonFiles.length > 0) {
+        const formData = new FormData();
+        lessonFiles.forEach((file) => {
+          formData.append('files', { 
+            uri: file.uri,
+            type: file.type || 'application/pdf',
+            name: file.name,
+          } as any);
+        });
+
+        const uploadRes = await lessonApi.uploadLessonFiles(formData);
+        if (uploadRes?.success) {
+          finalAttachmentUrls = uploadRes.data?.fileUrls || uploadRes.urls || [];
+        } else {
+          Alert.alert("Upload Warning", "Files failed to upload, saving lesson without them.");
+        }
+      }
+
+      const payload: any = {
+        title: cleanTitle,
+        subjectId: selectedSubjectId,
+        batchId: selectedBatchId,
+        scheduledAt: formattedIsoTimestamp,
+        duration: parsedDur,
+        type: lessonType,
+        content: contentText.trim() || undefined,
+        meetingLink: meetingLinkText.trim() || undefined,
+        ...(finalAttachmentUrls.length > 0 && { attachments: finalAttachmentUrls })
+      };
+
       let response;
       if (editingId) {
         response = await lessonApi.update(editingId, { ...payload, isActive });
@@ -220,14 +236,14 @@ const LessonScreen = ({ navigation }: { navigation: any }) => {
       }
 
       if (response?.success || response?._id) {
-        Alert.alert('Success', editingId ? 'Updated Successfully' : 'New academic lesson correctly added.');
-        resetFormState();
+        Alert.alert('Success', editingId ? 'Lesson updated.' : 'Lesson created successfully.');
+        closeAndResetModal();
         fetchOperationalWorkspaceAssets();
       } else {
-        Alert.alert('Action Refused', response?.message || 'Database target drop blocked modification execution.');
+        Alert.alert('Failed', response?.message || 'Could not save the lesson.');
       }
     } catch (error: any) {
-      Alert.alert('Persistence Validation Error', error.response?.data?.message || 'Network update connectivity failed.');
+      Alert.alert('Error', error.response?.data?.message || 'Server connection failed.');
     } finally {
       setIsSubmitting(false);
     }
@@ -236,21 +252,15 @@ const LessonScreen = ({ navigation }: { navigation: any }) => {
   const handleDeleteLesson = (id: string) => {
     Alert.alert(
       'Confirm Deletion',
-      'Are you sure you want to flag this instructional session as unlinked?',
+      'Are you sure you want to delete this lesson?',
       [
         { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
+        { text: 'Delete', style: 'destructive', onPress: async () => {
             try {
               const res = await lessonApi.delete(id);
-              if (res?.success || res?.message) {
-                if (editingId === id) resetFormState();
-                fetchOperationalWorkspaceAssets();
-              }
+              if (res?.success) fetchOperationalWorkspaceAssets();
             } catch (error: any) {
-              Alert.alert('Wipe Interrupted', error.response?.data?.message || 'Database record modification failure.');
+              Alert.alert('Error', 'Failed to delete lesson.');
             }
           }
         }
@@ -258,45 +268,65 @@ const LessonScreen = ({ navigation }: { navigation: any }) => {
     );
   };
 
-  const renderMiniLessonItem = (item: any) => {
+  const renderLessonCard = ({ item }: { item: any }) => {
     if (!item) return null;
     
-    // Evaluate if the logged-in user can modify this specific item
     const uploaderId = typeof item.teacherId === 'object' ? item.teacherId?._id : (item.teacherId || item.createdBy);
     const canManage = currentUserRole === 'admin' || (currentUserRole === 'teacher' && uploaderId === currentUserId);
 
-    const subObj = typeof item.subjectId === 'object' && item.subjectId ? item.subjectId : null;
-    const subjectName = subObj ? `${subObj.name} (${subObj.code || ''})` : 'Unmapped Target Subject';
-    
+    let subjectName = 'Assigned Subject';
+    if (item.subjectId && typeof item.subjectId === 'object') {
+      subjectName = `${item.subjectId.name || 'Subject'} (${item.subjectId.code || ''})`;
+    }
+
+    let batchName = 'Target Cohort';
+    if (item.batchId && typeof item.batchId === 'object') {
+      batchName = item.batchId.name || 'Batch';
+    }
+
     let rawDate = 'N/A';
-    if (typeof item.scheduledAt === 'string') rawDate = item.scheduledAt.split('T')[0];
+    let rawTime = '';
+    if (typeof item.scheduledAt === 'string') {
+      const segs = item.scheduledAt.split('T');
+      rawDate = segs[0];
+      if (segs.length > 1) rawTime = ` @ ${segs[1].substring(0, 5)}`;
+    }
 
     return (
-      <View key={item._id} style={[styles.miniCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <View style={styles.miniHeaderRow}>
-          <Text style={[styles.miniTitleText, { color: theme.text }]} numberOfLines={1}>{item.title || 'Untitled Session'}</Text>
-          <Text style={{ fontSize: 11, fontWeight: 'bold', color: theme.primary, textTransform: 'uppercase' }}>{item.type || 'LECTURE'}</Text>
+      <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+        <View style={styles.cardHeader}>
+          <Text style={[styles.cardTitle, { color: theme.text }]} numberOfLines={1}>
+            {item.title || 'Untitled Session'}
+          </Text>
+          <View style={[styles.badge, { backgroundColor: theme.primary }]}>
+            <Text style={styles.badgeText}>{item.type || 'LECTURE'}</Text>
+          </View>
         </View>
 
-        <Text style={{ fontSize: 12, color: theme.text, marginTop: 2 }}>Subject: {subjectName}</Text>
-        <Text style={{ fontSize: 12, color: theme.subText, marginBottom: 6 }}>Date: {rawDate} | Length: {item.duration || 0} Mins</Text>
+        <Text style={[styles.infoText, { color: theme.text, fontWeight: '600' }]}>Subject: {subjectName}</Text>
+        <Text style={[styles.infoText, { color: theme.subText, marginBottom: 8 }]}>Batch: {batchName}</Text>
 
-        <View style={styles.miniActionRow}>
+        <View style={styles.grid}>
+          <Text style={[styles.infoText, { color: theme.text }]}>Schedule: {rawDate}{rawTime}</Text>
+          <Text style={[styles.infoText, { color: theme.text }]}>Duration: {item.duration || 0} Mins</Text>
+        </View>
+
+        <View style={styles.actionRow}>
           {item.meetingLink ? (
-            <TouchableOpacity onPress={() => Linking.openURL(item.meetingLink)} style={{ marginRight: 16 }}>
-              <Text style={{ color: '#10B981', fontWeight: 'bold', fontSize: 12 }}>Join Session</Text>
+            <TouchableOpacity onPress={() => Linking.openURL(item.meetingLink)} style={styles.joinBtn}>
+              <Text style={{ color: '#10B981', fontWeight: 'bold', fontSize: 12 }}>Join Link</Text>
             </TouchableOpacity>
-          ) : null}
+          ) : <View style={{ flex: 1 }} />}
 
           {canManage && (
-            <>
-              <TouchableOpacity onPress={() => handleTriggerEdit(item)} style={{ marginRight: 12 }}>
+            <View style={{ flexDirection: 'row' }}>
+              <TouchableOpacity onPress={() => handleTriggerEdit(item)} style={styles.actionButton}>
                 <Text style={{ color: theme.primary, fontWeight: 'bold', fontSize: 12 }}>Edit</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => handleDeleteLesson(item._id)}>
+              <TouchableOpacity onPress={() => handleDeleteLesson(item._id)} style={styles.actionButton}>
                 <Text style={{ color: '#D32F2F', fontWeight: 'bold', fontSize: 12 }}>Delete</Text>
               </TouchableOpacity>
-            </>
+            </View>
           )}
         </View>
       </View>
@@ -305,158 +335,193 @@ const LessonScreen = ({ navigation }: { navigation: any }) => {
 
   const safeSubjects = Array.isArray(availableSubjects) ? availableSubjects : [];
   const safeBatches = Array.isArray(availableBatches) ? availableBatches : [];
-  const safeLessons = Array.isArray(lessons) ? lessons : [];
-  const topThreeLessons = safeLessons.slice(0, 3);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['bottom']}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: 16 }} showsVerticalScrollIndicator={true} keyboardShouldPersistTaps="handled">
-          
-          {/* ========================================== */}
-          {/* SECTION 1: MASTER ENTRY FORM (Hidden from Students) */}
-          {/* ========================================== */}
-          {currentUserRole !== 'student' && (
-            <View style={[styles.formWrapperBox, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-              <View style={styles.formHeaderRow}>
-                <Text style={[styles.formTitle, { color: theme.text }]}>{editingId ? 'Modify Session Settings' : 'Publish Class Lesson'}</Text>
-                {editingId ? (
-                  <TouchableOpacity onPress={resetFormState}>
-                    <Text style={styles.cancelText}>Clear Form</Text>
-                  </TouchableOpacity>
-                ) : null}
+      
+      {/* HEADER WITH ADD BUTTON */}
+      <View style={styles.headerContainer}>
+        <Text style={[styles.listHeader, { color: theme.text }]}>All Lessons</Text>
+        {currentUserRole !== 'student' && (
+          <TouchableOpacity 
+            style={[styles.addBtn, { backgroundColor: theme.primary }]}
+            onPress={() => setIsModalVisible(true)}
+          >
+            <Text style={styles.addBtnText}>+ Create Lesson</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* FULL LESSONS LIST */}
+      {isLoading ? (
+        <ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 40 }} />
+      ) : (
+        <FlatList
+          data={lessons}
+          keyExtractor={(item) => item ? item._id : Math.random().toString()}
+          renderItem={renderLessonCard}
+          contentContainerStyle={styles.listContent}
+          ListEmptyComponent={
+            <Text style={{ textAlign: 'center', marginTop: 40, color: theme.subText }}>No sessions available.</Text>
+          }
+        />
+      )}
+
+      {/* ========================================== */}
+      {/* POPUP MODAL FOR CREATE / EDIT */}
+      {/* ========================================== */}
+      <Modal visible={isModalVisible} transparent={true} animationType="slide" onRequestClose={closeAndResetModal}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
+            
+            <View style={styles.formHeaderRow}>
+              <Text style={[styles.formTitle, { color: theme.text }]}>
+                {editingId ? 'Modify Lesson' : 'Create Lesson'}
+              </Text>
+              <TouchableOpacity onPress={closeAndResetModal}>
+                <MaterialIcons name="close" size={24} color={theme.subText} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView contentContainerStyle={{ paddingBottom: 10 }} showsVerticalScrollIndicator={false}>
+              
+              <View style={styles.pickerContainer}>
+                <Text style={[styles.label, { color: theme.text }]}>LESSON TITLE *</Text>
+                <TextInput style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="Introduction to Algebra" placeholderTextColor={theme.subText} value={title} onChangeText={setTitle} />
               </View>
 
-              <Text style={[styles.label, { color: theme.text }]}>Lesson Title</Text>
-              <TextInput style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="Introduction to Algebra" placeholderTextColor={theme.subText} value={title} onChangeText={setTitle} />
+              <View style={styles.pickerContainer}>
+                <Text style={[styles.label, { color: theme.text }]}>BATCH *</Text>
+                <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border }]}>
+                  <Picker selectedValue={selectedBatchId} onValueChange={(v) => setSelectedBatchId(v)} dropdownIconColor={theme.primary} style={{ color: theme.text }}>
+                    <Picker.Item label="Select batch" value="" color={theme.subText} />
+                    {safeBatches.map((b) => <Picker.Item key={b._id} label={b?.name} value={b._id} />)}
+                  </Picker>
+                </View>
+              </View>
+
+              <View style={styles.pickerContainer}>
+                <Text style={[styles.label, { color: theme.text }]}>SUBJECT *</Text>
+                <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border }]}>
+                  <Picker selectedValue={selectedSubjectId} onValueChange={(v) => setSelectedSubjectId(v)} dropdownIconColor={theme.primary} style={{ color: theme.text }}>
+                    <Picker.Item label={selectedBatchId ? "Select subject" : "Select a batch first"} value="" color={theme.subText} />
+                    {safeSubjects.map((sub) => <Picker.Item key={sub._id} label={sub?.name} value={sub._id} />)}
+                  </Picker>
+                </View>
+              </View>
 
               <View style={styles.row}>
                 <View style={styles.halfInput}>
-                  <Text style={[styles.label, { color: theme.text }]}>Target Subject</Text>
+                  <Text style={[styles.label, { color: theme.text }]}>TYPE *</Text>
                   <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border }]}>
-                    <Picker selectedValue={selectedSubjectId} onValueChange={(v) => setSelectedSubjectId(v)} style={{ color: theme.text }} dropdownIconColor={theme.primary}>
-                      <Picker.Item label="-- Select Sub --" value="" color={theme.subText} />
-                      {safeSubjects.map((sub) => <Picker.Item key={sub._id} label={sub?.name ? `${sub.name} (${sub.code || ''})` : 'Unnamed'} value={sub._id} />)}
+                    <Picker selectedValue={lessonType} onValueChange={(v) => setLessonType(v)} dropdownIconColor={theme.primary} style={{ color: theme.text }}>
+                      <Picker.Item label="Lecture" value="lecture" /><Picker.Item label="Lab" value="lab" /><Picker.Item label="Tutorial" value="tutorial" />
                     </Picker>
                   </View>
                 </View>
 
                 <View style={styles.halfInput}>
-                  <Text style={[styles.label, { color: theme.text }]}>Target Batch</Text>
-                  <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border }]}>
-                    <Picker selectedValue={selectedBatchId} onValueChange={(v) => setSelectedBatchId(v)} style={{ color: theme.text }} dropdownIconColor={theme.primary}>
-                      <Picker.Item label="-- Select Batch --" value="" color={theme.subText} />
-                      {safeBatches.map((b) => <Picker.Item key={b._id} label={b?.name || 'Unnamed'} value={b._id} />)}
-                    </Picker>
-                  </View>
-                </View>
-              </View>
-
-              <View style={styles.row}>
-                <View style={styles.halfInput}>
-                  <Text style={[styles.label, { color: theme.text }]}>Session Format</Text>
-                  <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border }]}>
-                    <Picker selectedValue={lessonType} onValueChange={(v) => setLessonType(v)} style={{ color: theme.text }} dropdownIconColor={theme.primary}>
-                      <Picker.Item label="Lecture" value="lecture" /><Picker.Item label="Lab" value="lab" /><Picker.Item label="Tutorial" value="tutorial" /><Picker.Item label="Seminar" value="seminar" />
-                    </Picker>
-                  </View>
-                </View>
-
-                <View style={styles.halfInput}>
-                  <Text style={[styles.label, { color: theme.text }]}>Duration (Mins)</Text>
+                  <Text style={[styles.label, { color: theme.text }]}>DURATION (MINS) *</Text>
                   <TextInput style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="60" placeholderTextColor={theme.subText} value={durationText} onChangeText={setDurationText} keyboardType="numeric" />
                 </View>
               </View>
 
               <View style={styles.row}>
                 <View style={styles.halfInput}>
-                  <Text style={[styles.label, { color: theme.text }]}>Date (YYYY-MM-DD)</Text>
+                  <Text style={[styles.label, { color: theme.text }]}>DATE (YYYY-MM-DD) *</Text>
                   <TextInput style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="2026-05-15" placeholderTextColor={theme.subText} value={inputDate} onChangeText={setInputDate} maxLength={10} />
                 </View>
-
                 <View style={styles.halfInput}>
-                  <Text style={[styles.label, { color: theme.text }]}>Time (24H HH:MM)</Text>
+                  <Text style={[styles.label, { color: theme.text }]}>TIME (HH:MM) *</Text>
                   <TextInput style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="09:30" placeholderTextColor={theme.subText} value={inputTime} onChangeText={setInputTime} maxLength={5} />
                 </View>
               </View>
 
-              <Text style={[styles.label, { color: theme.text }]}>Virtual Conference URL</Text>
-              <TextInput style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="https://meet.domain.com/abc-xyz..." placeholderTextColor={theme.subText} value={meetingLinkText} onChangeText={setMeetingLinkText} autoCapitalize="none" />
+              <View style={styles.pickerContainer}>
+                <Text style={[styles.label, { color: theme.text }]}>MEETING LINK</Text>
+                <TextInput style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="https://zoom.us/j/..." placeholderTextColor={theme.subText} value={meetingLinkText} onChangeText={setMeetingLinkText} autoCapitalize="none" />
+                <Text style={{ fontSize: 11, color: theme.subText, marginTop: -4 }}>Zoom, Google Meet, or any video conference link</Text>
+              </View>
 
-              <Text style={[styles.label, { color: theme.text }]}>Attachments (Comma separated URLs)</Text>
-              <TextInput style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="link1.com, link2.com" placeholderTextColor={theme.subText} value={attachmentsText} onChangeText={setAttachmentsText} autoCapitalize="none" />
+              <View style={styles.pickerContainer}>
+                <Text style={[styles.label, { color: theme.text }]}>CONTENT / NOTES</Text>
+                <TextInput style={[styles.input, { height: 70, backgroundColor: theme.background, color: theme.text, borderColor: theme.border, paddingTop: 10 }]} placeholder="Lesson notes or description..." placeholderTextColor={theme.subText} value={contentText} onChangeText={setContentText} multiline textAlignVertical="top" />
+              </View>
 
-              <Text style={[styles.label, { color: theme.text }]}>Syllabus Plan</Text>
-              <TextInput style={[styles.input, { height: 56, backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="Describe topics..." placeholderTextColor={theme.subText} value={contentText} onChangeText={setContentText} multiline />
+              {/* 🌟 LESSON ATTACHMENTS (File Upload) */}
+              <View style={styles.pickerContainer}>
+                <Text style={[styles.label, { color: theme.text }]}>LESSON ATTACHMENTS</Text>
+                <TouchableOpacity onPress={handlePickFiles} style={[styles.uploadBox, { borderColor: theme.primary, backgroundColor: 'rgba(59, 130, 246, 0.05)' }]}>
+                  <MaterialIcons name="cloud-upload" size={28} color={theme.primary} style={{ marginBottom: 8 }} />
+                  <Text style={{ color: theme.text, fontWeight: 'bold' }}>Upload lesson files</Text>
+                  <Text style={{ color: theme.subText, fontSize: 11, marginTop: 4 }}>
+                    {lessonFiles.length > 0 ? `${lessonFiles.length} file(s) selected` : 'Click to select (up to 5 files)'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
 
-              {editingId ? (
+              {editingId && (
                 <View style={styles.switchRow}>
-                  <Text style={{ color: theme.text, fontWeight: '500' }}>Active Pipeline Broadcasting</Text>
+                  <Text style={{ color: theme.text, fontWeight: '500' }}>Active Status</Text>
                   <Switch value={isActive} onValueChange={setIsActive} thumbColor={theme.primary} />
                 </View>
-              ) : null}
+              )}
 
-              <TouchableOpacity style={[styles.mainButton, { backgroundColor: theme.primary }]} onPress={handleSaveOrUpdate} disabled={isSubmitting}>
-                {isSubmitting ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnText}>{editingId ? 'Update' : 'Submit'}</Text>}
-              </TouchableOpacity>
-            </View>
-          )}
+              <View style={styles.modalActionRow}>
+                <TouchableOpacity onPress={closeAndResetModal} style={[styles.cancelBtn, { borderColor: theme.border }]}>
+                  <Text style={{ color: theme.text, fontWeight: 'bold' }}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.saveBtn, { backgroundColor: theme.primary }]} onPress={handleSaveOrUpdate} disabled={isSubmitting}>
+                  {isSubmitting ? <ActivityIndicator color="#FFF" size="small" /> : <Text style={styles.btnText}>{editingId ? 'Update' : 'Save'}</Text>}
+                </TouchableOpacity>
+              </View>
 
-          {/* ========================================== */}
-          {/* SECTION 2: TOP 3 LIST VIEWS */}
-          {/* ========================================== */}
-          <View style={styles.miniRegistryBlock}>
-            <Text style={[styles.registryHeading, { color: theme.text }]}>All Lessons(Top 3)</Text>
-            
-            {isLoading ? (
-              <ActivityIndicator size="small" color={theme.primary} style={{ marginVertical: 20 }} />
-            ) : topThreeLessons.length > 0 ? (
-              topThreeLessons.map(renderMiniLessonItem)
-            ) : (
-              <Text style={[styles.emptyText, { color: theme.subText }]}>No instructional entries currently mapped.</Text>
-            )}
-
-            {safeLessons.length > 0 && (
-              <TouchableOpacity 
-                style={[styles.viewAllBtn, { borderColor: theme.primary }]}
-                onPress={() => navigation.navigate('AllLessonsFeed', { lessonsData: safeLessons, currentUserRole, currentUserId })}
-              >
-                <Text style={{ color: theme.primary, fontWeight: 'bold', fontSize: 14 }}>
-                  View All Lessons ({safeLessons.length})
-                </Text>
-              </TouchableOpacity>
-            )}
+            </ScrollView>
           </View>
-
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  formWrapperBox: { padding: 16, borderRadius: 12, borderWidth: 1, marginBottom: 24 },
-  formHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  formTitle: { fontSize: 18, fontWeight: 'bold' },
-  cancelText: { color: '#D32F2F', fontWeight: '600', fontSize: 14 },
-  label: { fontSize: 12, fontWeight: '600', marginBottom: 4 },
-  input: { height: 44, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, marginBottom: 10 },
-  row: { flexDirection: 'row', justifyContent: 'space-between' },
-  halfInput: { width: '48%' },
-  pickerWrapper: { height: 46, borderWidth: 1, borderRadius: 8, justifyContent: 'center', overflow: 'hidden', marginBottom: 10 },
-  switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 6 },
-  mainButton: { height: 48, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginTop: 10 },
-  btnText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
+  headerContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 },
+  listHeader: { fontSize: 20, fontWeight: 'bold' },
+  addBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
+  addBtnText: { color: '#FFF', fontWeight: 'bold', fontSize: 13 },
+  
+  listContent: { paddingHorizontal: 16, paddingBottom: 24, paddingTop: 8 },
+  card: { padding: 16, borderRadius: 10, borderWidth: 1, marginBottom: 12 },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  cardTitle: { fontSize: 16, fontWeight: 'bold', flex: 1, marginRight: 8 },
+  badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
+  badgeText: { color: '#FFF', fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase' },
+  grid: { borderTopWidth: 0.5, borderTopColor: '#DDD', paddingTop: 8, marginTop: 4 },
+  infoText: { fontSize: 13, marginBottom: 2 },
+  actionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, marginTop: 6, borderTopWidth: 0.5, borderTopColor: '#EEE' },
+  actionButton: { marginLeft: 16, paddingVertical: 4 },
+  joinBtn: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4, borderColor: '#10B981', backgroundColor: 'rgba(16, 185, 129, 0.1)' },
 
-  miniRegistryBlock: { marginTop: 4 },
-  registryHeading: { fontSize: 16, fontWeight: 'bold', marginBottom: 12 },
-  miniCard: { padding: 14, borderRadius: 8, borderWidth: 1, marginBottom: 10 },
-  miniHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  miniTitleText: { fontSize: 15, fontWeight: 'bold', flex: 1, marginRight: 8 },
-  miniActionRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingTop: 8, borderTopWidth: 0.5, borderTopColor: '#EEE', marginTop: 4 },
-  viewAllBtn: { borderWidth: 1, borderRadius: 8, paddingVertical: 12, alignItems: 'center', marginTop: 8, backgroundColor: 'rgba(2, 136, 209, 0.05)' },
-  emptyText: { textAlign: 'center', fontSize: 12, marginVertical: 12 },
+  // MODAL STYLES
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 16 },
+  modalContent: { borderRadius: 12, padding: 20, elevation: 5, maxHeight: '90%' },
+  formHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  formTitle: { fontSize: 20, fontWeight: 'bold' },
+  label: { fontSize: 11, fontWeight: '700', marginBottom: 6, color: '#555' },
+  input: { height: 44, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12 },
+  pickerContainer: { marginBottom: 14 },
+  pickerWrapper: { height: 44, borderWidth: 1, borderRadius: 8, justifyContent: 'center', overflow: 'hidden' },
+  row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 14 },
+  halfInput: { width: '48%' },
+  
+  uploadBox: { borderWidth: 1, borderStyle: 'dashed', borderRadius: 7, alignItems: 'center', justifyContent: 'center', paddingVertical: 20 },
+  switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 8 },
+
+  modalActionRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 },
+  cancelBtn: { paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8, borderWidth: 1, marginRight: 12, justifyContent: 'center' },
+  saveBtn: { paddingVertical: 10, paddingHorizontal: 24, borderRadius: 8, justifyContent: 'center' },
+  btnText: { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
 });
 
 export default LessonScreen;

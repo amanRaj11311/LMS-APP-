@@ -128,7 +128,7 @@ const SubjectScreen = () => {
     const cleanCode = code.trim().toUpperCase();
 
     if (!cleanName || !cleanCode || !selectedClassId || !selectedTeacherId) {
-      Alert.alert('Input Validation', 'Kripya Subject Name, Code, Target Class, aur Instructor zaroor select karein.');
+      Alert.alert('Input Validation', 'Please fill in all required fields and ensure valid selections for class and teacher');
       return;
     }
 
@@ -214,7 +214,7 @@ const SubjectScreen = () => {
         {item.description ? <Text style={[styles.descText, { color: theme.text }]}>{item.description}</Text> : null}
 
         <View style={styles.gridRow}>
-          <Text style={[styles.infoText, { color: theme.subText }]}>Class Target: <Text style={{ fontWeight: '600', color: theme.text }}>{className}</Text></Text>
+          <Text style={[styles.infoText, { color: theme.subText }]}>Class: <Text style={{ fontWeight: '600', color: theme.text }}>{className}</Text></Text>
           <Text style={[styles.infoText, { color: theme.subText }]}>Instructor: <Text style={{ fontWeight: '500', color: theme.text }}>{teacherName}</Text></Text>
         </View>
 
@@ -242,7 +242,7 @@ const SubjectScreen = () => {
         <View style={[styles.formCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           <View style={styles.formHeaderRow}>
             <Text style={[styles.formTitle, { color: theme.text }]}>
-              {editingId ? 'Modify Subject Parameters' : 'Configure New Subject'}
+              {editingId ? 'Modify Subject Parameters' : 'Add New Subject'}
             </Text>
             {editingId && (
               <TouchableOpacity onPress={resetFormState}>
@@ -287,7 +287,8 @@ const SubjectScreen = () => {
                 dropdownIconColor={theme.primary}
                 style={{ color: theme.text }}
               >
-                <Picker.Item label="-- Select Mapped Class --" value="" color={theme.subText} />
+                <Picker.Item label="-- assigned
+                Class --" value="" color={theme.subText} />
                 {availableClasses.map((cls) => (
                   <Picker.Item key={cls._id} label={cls.name} value={cls._id} />
                 ))}
@@ -304,7 +305,7 @@ const SubjectScreen = () => {
                 dropdownIconColor={theme.primary}
                 style={{ color: theme.text }}
               >
-                <Picker.Item label="-- Select Mapped Teacher --" value="" color={theme.subText} />
+                <Picker.Item label="-- assigned Teacher --" value="" color={theme.subText} />
                 {availableTeachers.map((teacher) => {
                   // Resolve embedded teacher user data attributes cleanly
                   const targetUser = typeof teacher.userId === 'object' ? teacher.userId : null;
@@ -324,7 +325,7 @@ const SubjectScreen = () => {
             </View>
           </View>
 
-          <Text style={[styles.inputLabel, { color: theme.text }]}>Syllabus Description Overview</Text>
+          <Text style={[styles.inputLabel, { color: theme.text }]}>Description</Text>
           <TextInput
             style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]}
             placeholder="Description info strings"
@@ -348,14 +349,14 @@ const SubjectScreen = () => {
             {isSubmitting ? (
               <ActivityIndicator color="#FFF" />
             ) : (
-              <Text style={styles.btnText}>{editingId ? 'Update ' : 'Submit'}</Text>
+              <Text style={styles.btnText}>{editingId ? 'Update ' : 'Save'}</Text>
             )}
           </TouchableOpacity>
         </View>
       )}
 
       {/* 2. FLATLIST RENDERED SYLLABUS REGISTRY */}
-      <Text style={[styles.listHeader, { color: theme.text }]}>Mapped Study Materials Registry</Text>
+      <Text style={[styles.listHeader, { color: theme.text }]}>Subjects</Text>
 
       {isLoading ? (
         <ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 40 }} />

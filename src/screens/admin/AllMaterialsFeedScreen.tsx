@@ -99,7 +99,7 @@ const styles = StyleSheet.create({
   cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
   cardTitleText: { fontSize: 16, fontWeight: 'bold', flex: 1, marginRight: 8 },
   statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
-  badgeText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
+  badgeText: { color: '#FFF', fontSize: 9, fontWeight: 'bold' },
   metadataGrid: { flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 0.5, borderTopColor: '#EEE', paddingTop: 8, marginTop: 4 },
   actionConsoleRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginTop: 12 },
   launchBtn: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 6 },

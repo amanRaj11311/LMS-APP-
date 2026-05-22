@@ -147,7 +147,7 @@ const ClassScreen = () => {
         {item.description ? <Text style={[styles.descText, { color: theme.subText }]}>{item.description}</Text> : null}
 
         <Text style={[styles.infoText, { color: theme.text, marginTop: 4 }]}>
-          Linked Groupings: <Text style={{ fontWeight: 'bold' }}>{batchCount} active batch(es)</Text>
+          Batches: <Text style={{ fontWeight: 'bold' }}>{batchCount} active batch(es)</Text>
         </Text>
 
         {isAdmin && (
@@ -171,7 +171,7 @@ const ClassScreen = () => {
         <View style={[styles.formCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           <View style={styles.formHeaderRow}>
             <Text style={[styles.formTitle, { color: theme.text }]}>
-              {editingId ? 'Modify Root Class' : 'Define Root Class'}
+              {editingId ? 'Modify Root Class' : 'Add Class'}
             </Text>
             {editingId && (
               <TouchableOpacity onPress={resetFormState}>
@@ -213,7 +213,7 @@ const ClassScreen = () => {
         </View>
       )}
 
-      <Text style={[styles.listHeader, { color: theme.text }]}>Root Classes Mapped</Text>
+      <Text style={[styles.listHeader, { color: theme.text }]}>Classes</Text>
 
       {isLoading ? (
         <ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 40 }} />
