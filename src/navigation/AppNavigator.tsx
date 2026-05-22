@@ -302,8 +302,8 @@ const CustomDrawerContent = (
 
   const handleLogout = async () => {
     Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
+     
+      'Confirm Logout', 'Are you sure you want to end your session?',
       [
         {
           text: 'Cancel',
@@ -488,11 +488,11 @@ const CustomDrawerContent = (
               'Timetable'
             )}
 
-            {renderDrawerItem(
+            {/* {renderDrawerItem(
               'Attendance',
               'event-available',
               'Attendance'
-            )}
+            )} */}
           </>
         )}
 
@@ -549,13 +549,13 @@ const CustomDrawerContent = (
         )}
 
         {/* SETTINGS */}
-        {renderSectionLabel('SETTINGS')}
+        {/* {renderSectionLabel('SETTINGS')}
 
         {renderDrawerItem(
           'My Profile',
           'person',
           'ProfileScreen'
-        )}
+        )} */}
       </DrawerContentScrollView>
 
       {/* FOOTER */}

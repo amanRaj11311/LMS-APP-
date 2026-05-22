@@ -180,13 +180,13 @@ const DashboardScreen = ({ navigation }: { navigation: any }) => {
         <Text style={[styles.sectionTitle, { color: theme.text }]}>My Workspace</Text>
         
         <View style={styles.gridContainer}>
-          <ActionTile title="My Profile" icon="person" route="ProfileScreen" />
+          {/* <ActionTile title="My Profile" icon="person" route="ProfileScreen" /> */}
           <ActionTile title="Timetable" icon="view-timeline" route="Timetable" />
           <ActionTile title="Study Material" icon="library-books" route="StudyMaterial" />
           <ActionTile title="Lessons" icon="menu-book" route="Lesson" />
           <ActionTile title="Assignments" icon="assignment" route="Assignment" />
           <ActionTile title="My Exams" icon="schedule" route="Exam" />
-          <ActionTile title="Attendance" icon="event-available" route="Attendance" />
+          {/* <ActionTile title="Attendance" icon="event-available" route="Attendance" /> */}
           <ActionTile title="Leave" icon="beach-access" route="Leave" />
           {userRole === 'admin' && <ActionTile title="Enrollments" icon="how-to-reg" route="Enrollment" />}
         </View>
