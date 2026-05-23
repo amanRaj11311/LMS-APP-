@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { 
   View, 
   Text, 
@@ -9,14 +9,16 @@ import {
   ActivityIndicator, 
   Alert, 
   Keyboard,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform
+  Modal,
+  RefreshControl,
+  Platform,
+  KeyboardAvoidingView
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Picker } from '@react-native-picker/picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
+import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 
 import { useTheme } from '../../theme/ThemeContext';
 import { leaveApi, LeaveApplication, ApplyLeavePayload } from '../../api/leaveApi';
@@ -29,37 +31,40 @@ const LeaveScreen = ({ navigation }: { navigation: any }) => {
   const [leavesFeed, setLeavesFeed] = useState<LeaveApplication[]>([]);
   const [substituteTeachers, setSubstituteTeachers] = useState<UserAccount[]>([]);
   
+  // Filtering States
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [filterType, setFilterType] = useState<string>('');
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
+  // Apply Leave Modal State
+  const [isApplyModalVisible, setIsApplyModalVisible] = useState<boolean>(false);
+
+  // Form States
   const [leaveType, setLeaveType] = useState<'sick' | 'casual' | 'earned' | 'unpaid' | 'other'>('casual');
-  const [fromDateInput, setFromDateInput] = useState<string>('2026-05-20');
-  const [toDateInput, setToDateInput] = useState<string>('2026-05-22');
+  const [fromDateInput, setFromDateInput] = useState<string>('');
+  const [toDateInput, setToDateInput] = useState<string>('');
   const [reasonInput, setReasonInput] = useState<string>('');
   const [selectedSubstituteId, setSelectedSubstituteId] = useState<string>('');
 
+  // Admin Review State
   const [reviewRemarksBuffer, setReviewRemarksBuffer] = useState<{ [key: string]: string }>({});
 
   const fetchMasterLeaveTelemetry = useCallback(async (roleOverride?: 'admin' | 'teacher' | 'student') => {
-    setIsLoading(true);
     try {
       const activeRole = roleOverride || currentUserRole;
-      
       let leavesData: LeaveApplication[] = [];
       
-      // 🌟 SAFE API CALLS WITH STRICT FALLBACKS
+      const queryParams: any = {};
+      if (filterStatus) queryParams.status = filterStatus.toLowerCase();
+      if (filterType && activeRole === 'admin') queryParams.type = filterType.toLowerCase();
+
       if (activeRole === 'admin') {
-        const queryParams: any = {};
-        if (filterStatus) queryParams.status = filterStatus.toLowerCase();
-        if (filterType) queryParams.type = filterType.toLowerCase();
         const res = await leaveApi.getAll(queryParams);
         if (res?.success) leavesData = Array.isArray(res.data) ? res.data : [];
       } else {
-        const queryParams: any = {};
-        if (filterStatus) queryParams.status = filterStatus.toLowerCase();
         const res = await leaveApi.getMyLeaves(queryParams);
         if (res?.success) leavesData = Array.isArray(res.data) ? res.data : [];
       }
@@ -78,44 +83,41 @@ const LeaveScreen = ({ navigation }: { navigation: any }) => {
       }
     } catch (error: any) {
       console.warn("API Fetch Failed:", error?.message);
-    } finally {
-      setIsLoading(false);
     }
   }, [currentUserRole, filterStatus, filterType]);
 
-  useFocusEffect(
-    useCallback(() => {
-      let isMounted = true;
-      const verifyAndInitializeRuntimeState = async () => {
-        try {
-          const storedString = await AsyncStorage.getItem("user_data");
-          let evaluatedRole: 'admin' | 'teacher' | 'student' = 'student';
-          
-          if (storedString) {
-            const userObj = JSON.parse(storedString);
-            if (userObj?.role) {
-              if (typeof userObj.role === 'string') evaluatedRole = userObj.role.trim().toLowerCase() as any;
-              else if (typeof userObj.role === 'object' && userObj.role.name) evaluatedRole = userObj.role.name.trim().toLowerCase() as any;
-            }
-            if (!['admin', 'teacher', 'student'].includes(evaluatedRole)) evaluatedRole = 'student'; 
-            if (isMounted) setCurrentUserRole(evaluatedRole);
-          }
-          if (isMounted) await fetchMasterLeaveTelemetry(evaluatedRole);
-        } catch (err) {
-          console.warn("Storage runtime error:", err);
-          if (isMounted) setIsLoading(false);
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      const storedString = await AsyncStorage.getItem("user_data");
+      let evaluatedRole: 'admin' | 'teacher' | 'student' = 'student';
+      if (storedString) {
+        const userObj = JSON.parse(storedString);
+        if (userObj?.role) {
+          if (typeof userObj.role === 'string') evaluatedRole = userObj.role.trim().toLowerCase() as any;
+          else if (typeof userObj.role === 'object' && userObj.role.name) evaluatedRole = userObj.role.name.trim().toLowerCase() as any;
         }
-      };
+      }
+      if (!['admin', 'teacher', 'student'].includes(evaluatedRole)) evaluatedRole = 'student'; 
+      setCurrentUserRole(evaluatedRole);
+      await fetchMasterLeaveTelemetry(evaluatedRole);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-      verifyAndInitializeRuntimeState();
-      return () => { isMounted = false; };
-    }, [filterStatus, filterType, fetchMasterLeaveTelemetry])
-  );
+  useFocusEffect(useCallback(() => { loadData(); }, [filterStatus, filterType]));
+
+  const onRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchMasterLeaveTelemetry();
+    setIsRefreshing(false);
+  };
 
   const resetFormState = () => {
     setLeaveType('casual');
-    setFromDateInput('2026-05-20');
-    setToDateInput('2026-05-22');
+    setFromDateInput('');
+    setToDateInput('');
     setReasonInput('');
     setSelectedSubstituteId('');
     Keyboard.dismiss();
@@ -127,7 +129,7 @@ const LeaveScreen = ({ navigation }: { navigation: any }) => {
     const cleanReason = reasonInput.trim();
 
     if (!cleanFrom || !cleanTo || !cleanReason) {
-      Alert.alert('Validation Error', 'Provide mandatory parameter fields.');
+      Alert.alert('Validation Error', 'Provide all mandatory fields (Dates and Reason).');
       return;
     }
 
@@ -145,6 +147,7 @@ const LeaveScreen = ({ navigation }: { navigation: any }) => {
       if (res?.success || res?.data) {
         Alert.alert('Success', 'Leave request submitted successfully.');
         resetFormState();
+        setIsApplyModalVisible(false);
         fetchMasterLeaveTelemetry();
       } else {
         Alert.alert('Refused', res?.message || 'Transaction blocked.');
@@ -200,7 +203,7 @@ const LeaveScreen = ({ navigation }: { navigation: any }) => {
     );
   };
 
-  const renderMiniLeaveCard = ({ item }: { item: LeaveApplication }) => {
+  const renderLeaveCard = ({ item }: { item: LeaveApplication }) => {
     if (!item) return null;
     
     const isAdmin = currentUserRole === 'admin';
@@ -208,7 +211,7 @@ const LeaveScreen = ({ navigation }: { navigation: any }) => {
     const currentType = String(item.type || 'Leave').toUpperCase();
     
     const userObj = typeof item.userId === 'object' && item.userId ? item.userId : null;
-    const applicantName = userObj ? `${userObj.firstName || ''} ${userObj.lastName || ''}`.trim() : 'My Leave';
+    const applicantName = userObj ? `${userObj.firstName || ''} ${userObj.lastName || ''}`.trim() : 'My Leave Request';
     
     let statusColor = '#3B82F6'; // Blue for pending
     if (currentStatus === 'approved') statusColor = '#10B981';
@@ -233,12 +236,14 @@ const LeaveScreen = ({ navigation }: { navigation: any }) => {
           </View>
         </View>
 
-        <Text style={{ fontSize: 12, color: theme.text, fontWeight: '500', marginBottom: 2 }}>Duration: {fromStr} to {toStr} ({item.totalDays || 0} Days)</Text>
-        <Text style={{ fontSize: 12, color: theme.subText, marginBottom: 8 }} numberOfLines={2}>Reason: {item.reason || 'None'}</Text>
+        <Text style={{ fontSize: 13, color: theme.text, fontWeight: '500', marginBottom: 4 }}>
+           <MaterialIcons name="date-range" size={14} color={theme.subText} /> {fromStr} to {toStr} ({item.totalDays || 0} Days)
+        </Text>
+        <Text style={{ fontSize: 13, color: theme.subText, marginBottom: 8 }} numberOfLines={3}>Reason: {item.reason || 'None'}</Text>
 
         {item.reviewRemarks ? (
           <View style={styles.reviewContextBox}>
-            <Text style={{ fontSize: 11, color: theme.subText, fontStyle: 'italic' }}>Admin Note: {item.reviewRemarks}</Text>
+            <Text style={{ fontSize: 12, color: theme.subText, fontStyle: 'italic' }}>Admin Note: {item.reviewRemarks}</Text>
           </View>
         ) : null}
 
@@ -247,30 +252,30 @@ const LeaveScreen = ({ navigation }: { navigation: any }) => {
           <View style={styles.adminActionConsole}>
             <TextInput 
               style={[styles.smallInput, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} 
-              placeholder="Add admin review remark..." 
+              placeholder="Add admin review remark (optional)..." 
               placeholderTextColor={theme.subText}
               value={currentRemarkText}
               onChangeText={(text) => setReviewRemarksBuffer(prev => ({ ...prev, [item._id]: text }))}
             />
             <View style={styles.decisionRow}>
               <TouchableOpacity onPress={() => handleExecuteReviewAction(item._id, 'approved')} style={[styles.decisionBtn, { backgroundColor: '#10B981' }]}>
-                <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 11 }}>Approve</Text>
+                <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 12 }}>Approve</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => handleExecuteReviewAction(item._id, 'rejected')} style={[styles.decisionBtn, { backgroundColor: '#EF4444', marginLeft: 8 }]}>
-                <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 11 }}>Reject</Text>
+              <TouchableOpacity onPress={() => handleExecuteReviewAction(item._id, 'rejected')} style={[styles.decisionBtn, { backgroundColor: '#EF4444', marginLeft: 10 }]}>
+                <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 12 }}>Reject</Text>
               </TouchableOpacity>
             </View>
           </View>
         )}
 
-        {/* 🌟 USER CANCELLATION BUTTON (VISIBLE ONLY IF PENDING AND NOT ADMIN) */}
+        {/* USER CANCELLATION BUTTON (Only if pending & not admin) */}
         {!isAdmin && currentStatus === 'pending' && (
-          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10, borderTopWidth: 0.5, borderTopColor: '#EEE', paddingTop: 10 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 12, borderTopWidth: 0.5, borderTopColor: '#EEE', paddingTop: 12 }}>
             <TouchableOpacity 
               onPress={() => handleExecuteCancelApplication(item._id)}
-              style={{ backgroundColor: '#FEF2F2', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#FECACA' }}
+              style={{ backgroundColor: '#FEF2F2', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: '#FECACA' }}
             >
-              <Text style={{ color: '#EF4444', fontWeight: 'bold', fontSize: 12 }}>Cancel Request</Text>
+              <Text style={{ color: '#EF4444', fontWeight: 'bold', fontSize: 13 }}>Cancel Request</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -279,140 +284,200 @@ const LeaveScreen = ({ navigation }: { navigation: any }) => {
   };
 
   const safeLeavesFeed = Array.isArray(leavesFeed) ? leavesFeed : [];
-  const safeTeachersFeed = Array.isArray(substituteTeachers) ? substituteTeachers : [];
-  const topThreeLeaves = safeLeavesFeed.slice(0, 3);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['bottom']}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: 16 }} showsVerticalScrollIndicator={true} keyboardShouldPersistTaps="handled">
-          
-          {/* APPLICATION FORM (Hidden for Admins) */}
-          {currentUserRole !== 'admin' && (
-            <View style={[styles.formWrapperBox, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-              <Text style={[styles.formTitle, { color: theme.text, marginBottom: 12 }]}>Apply for Leave</Text>
+      
+      {/* MODERN HEADER & FILTER SECTION */}
+      <View style={[styles.headerSection, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
+          <View style={styles.headerTitleRow}>
+              <Text style={[styles.mainHeading, { color: theme.text }]}>Leave Management</Text>
+              {currentUserRole !== 'admin' && (
+                  <TouchableOpacity 
+                     style={[styles.applyBtn, { backgroundColor: theme.primary }]}
+                     onPress={() => setIsApplyModalVisible(true)}
+                  >
+                     <MaterialIcons name="add" size={18} color="#FFF" style={{marginRight: 4}} />
+                     <Text style={{ color: '#FFF', fontWeight: 'bold' }}>Apply Leave</Text>
+                  </TouchableOpacity>
+              )}
+          </View>
 
-              <View style={styles.row}>
-                <View style={styles.halfInput}>
-                  <Text style={[styles.label, { color: theme.text }]}>Leave Type</Text>
-                  <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border }]}>
-                    <Picker selectedValue={leaveType} onValueChange={(v) => setLeaveType(v)} style={{ color: theme.text }} dropdownIconColor={theme.primary}>
-                      <Picker.Item label="Casual" value="casual" /><Picker.Item label="Sick" value="sick" /><Picker.Item label="Earned" value="earned" /><Picker.Item label="Unpaid" value="unpaid" /><Picker.Item label="Other" value="other" />
-                    </Picker>
-                  </View>
-                </View>
-
-                {currentUserRole === 'teacher' ? (
-                  <View style={styles.halfInput}>
-                    <Text style={[styles.label, { color: theme.text }]}>Substitute (Optional)</Text>
-                    <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border }]}>
-                      <Picker selectedValue={selectedSubstituteId} onValueChange={(v) => setSelectedSubstituteId(v)} style={{ color: theme.text }} dropdownIconColor={theme.primary}>
-                        <Picker.Item label="-- None --" value="" color={theme.subText} />
-                        {safeTeachersFeed.map(tea => <Picker.Item key={tea._id} label={`${tea.firstName} ${tea.lastName}`} value={tea._id} />)}
-                      </Picker>
-                    </View>
-                  </View>
-                ) : <View style={styles.halfInput} />}
-              </View>
-
-              <View style={styles.row}>
-                <View style={styles.halfInput}>
-                  <Text style={[styles.label, { color: theme.text }]}>Start Date (YYYY-MM-DD)</Text>
-                  <TextInput style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="2026-05-20" placeholderTextColor={theme.subText} value={fromDateInput} onChangeText={setFromDateInput} maxLength={10} />
-                </View>
-
-                <View style={styles.halfInput}>
-                  <Text style={[styles.label, { color: theme.text }]}>End Date (YYYY-MM-DD)</Text>
-                  <TextInput style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="2026-05-22" placeholderTextColor={theme.subText} value={toDateInput} onChangeText={setToDateInput} maxLength={10} />
-                </View>
-              </View>
-
-              <Text style={[styles.label, { color: theme.text }]}>Reason</Text>
-              <TextInput style={[styles.input, { height: 56, backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="Provide reason..." placeholderTextColor={theme.subText} value={reasonInput} onChangeText={setReasonInput} multiline />
-
-              <TouchableOpacity style={[styles.mainButton, { backgroundColor: theme.primary }]} onPress={handleApplyLeaveSubmission} disabled={isSubmitting}>
-                {isSubmitting ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnText}>Submit Request</Text>}
-              </TouchableOpacity>
+          <View style={styles.filterRow}>
+            <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border, flex: 1, marginRight: currentUserRole === 'admin' ? 8 : 0 }]}>
+              <Picker 
+  selectedValue={filterStatus} 
+  onValueChange={(v) => setFilterStatus(v)} 
+  style={{
+    color: theme.text,
+    height: Platform.OS === 'android' ? 50 : 40,
+  }}
+  itemStyle={{ color: theme.text }}
+  dropdownIconColor={theme.primary}
+>
+                <Picker.Item label="All Status" value="" color={theme.subText} />
+                <Picker.Item label="Pending" value="pending" />
+                <Picker.Item label="Approved" value="approved" />
+                <Picker.Item label="Rejected" value="rejected" />
+                <Picker.Item label="Cancelled" value="cancelled" />
+              </Picker>
             </View>
-          )}
-
-          {/* FILTER CONTROLS */}
-          <View style={[styles.filterBarBox, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            <Text style={{ fontSize: 12, fontWeight: 'bold', color: theme.primary, marginBottom: 6 }}>Filter Records</Text>
-            <View style={styles.row}>
-              <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border, flex: 0.48, height: 38 }]}>
-                <Picker selectedValue={filterStatus} onValueChange={(v) => setFilterStatus(v)} style={{ color: theme.text }} dropdownIconColor={theme.primary}>
-                  <Picker.Item label="-- Status All --" value="" color={theme.subText} /><Picker.Item label="Pending" value="pending" /><Picker.Item label="Approved" value="approved" /><Picker.Item label="Rejected" value="rejected" /><Picker.Item label="Cancelled" value="cancelled" />
+            
+            {currentUserRole === 'admin' && (
+              <View
+  style={[
+    styles.pickerWrapper,
+    {
+      backgroundColor: theme.background,
+      borderColor: theme.border,
+      flex: 1,
+      marginLeft: 8,
+      height: 50,
+      justifyContent: 'center',
+    },
+  ]}
+>
+   <Picker
+  selectedValue={filterType}
+  onValueChange={(v) => setFilterType(v)}
+  dropdownIconColor={theme.primary}
+  style={{
+    color: theme.text,
+    height: 54,
+    marginTop: Platform.OS === 'android' ? -2 : 0,
+  }}
+  itemStyle={{
+    color: theme.text,
+  }}
+>
+                  <Picker.Item label="All Types" value="" color={theme.subText} />
+                  <Picker.Item label="Casual" value="casual" />
+                  <Picker.Item label="Sick" value="sick" />
+                  <Picker.Item label="Earned" value="earned" />
+                  <Picker.Item label="Unpaid" value="unpaid" />
+                  <Picker.Item label="Other" value="other" />
                 </Picker>
               </View>
-              {currentUserRole === 'admin' && (
-                <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border, flex: 0.48, height: 38 }]}>
-                  <Picker selectedValue={filterType} onValueChange={(v) => setFilterType(v)} style={{ color: theme.text }} dropdownIconColor={theme.primary}>
-                    <Picker.Item label="-- Type All --" value="" color={theme.subText} /><Picker.Item label="Casual" value="casual" /><Picker.Item label="Sick" value="sick" /><Picker.Item label="Earned" value="earned" /><Picker.Item label="Unpaid" value="unpaid" /><Picker.Item label="Other" value="other" />
+            )}
+          </View>
+      </View>
+
+      {/* LIST SECTION */}
+      {isLoading && safeLeavesFeed.length === 0 ? (
+        <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+           <ActivityIndicator size="large" color={theme.primary} />
+        </View>
+      ) : (
+        <FlatList
+          data={safeLeavesFeed}
+          keyExtractor={(item) => item ? item._id : Math.random().toString()}
+          renderItem={renderLeaveCard}
+          contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
+          refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={[theme.primary]} />}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+               <MaterialIcons name="insert-drive-file" size={60} color="#D1D5DB" />
+               <Text style={[styles.emptyText, { color: theme.subText }]}>No leave records found matching your criteria.</Text>
+            </View>
+          }
+        />
+      )}
+
+      {/* APPLY LEAVE MODAL (For Student/Teacher) */}
+      <Modal visible={isApplyModalVisible} animationType="slide" transparent={true}>
+         <View style={styles.modalOverlay}>
+            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{width: '100%', alignItems: 'center'}}>
+              <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
+                <View style={styles.modalHeaderRow}>
+                    <Text style={[styles.modalTitle, { color: theme.text }]}>Apply for Leave</Text>
+                    <TouchableOpacity onPress={() => setIsApplyModalVisible(false)}><MaterialIcons name="close" size={24} color={theme.subText}/></TouchableOpacity>
+                </View>
+
+                <Text style={[styles.label, { color: theme.text }]}>Leave Type *</Text>
+                <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border, marginBottom: 15 }]}>
+                  <Picker selectedValue={leaveType} onValueChange={(v) => setLeaveType(v)} style={{ color: theme.text }}>
+                    <Picker.Item label="Casual Leave" value="casual" /><Picker.Item label="Sick Leave" value="sick" /><Picker.Item label="Earned Leave" value="earned" /><Picker.Item label="Unpaid Leave" value="unpaid" /><Picker.Item label="Other" value="other" />
                   </Picker>
                 </View>
-              )}
-            </View>
-          </View>
 
-          {/* OUTPUT PREVIEW CONTAINER */}
-          <View style={styles.miniRegistryBlock}>
-            <Text style={[styles.registryHeading, { color: theme.text }]}>
-              {currentUserRole === 'admin' ? `All Leaves Queue` : 'My History (Top 3)'}
-            </Text>
+                {currentUserRole === 'teacher' && (
+                   <>
+                     <Text style={[styles.label, { color: theme.text }]}>Substitute Teacher (Optional)</Text>
+                     <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border, marginBottom: 15 }]}>
+                       <Picker selectedValue={selectedSubstituteId} onValueChange={(v) => setSelectedSubstituteId(v)} style={{ color: theme.text }}>
+                         <Picker.Item label="-- None --" value="" color={theme.subText} />
+                         {substituteTeachers.map(tea => <Picker.Item key={tea._id} label={`${tea.firstName} ${tea.lastName}`} value={tea._id} />)}
+                       </Picker>
+                     </View>
+                   </>
+                )}
 
-            {isLoading ? (
-              <ActivityIndicator size="small" color={theme.primary} style={{ marginVertical: 20 }} />
-            ) : topThreeLeaves.length > 0 ? (
-              topThreeLeaves.map((item, idx) => <View key={idx}>{renderMiniLeaveCard({ item })}</View>)
-            ) : (
-              <Text style={[styles.emptyText, { color: theme.subText }]}>No leave records found.</Text>
-            )}
+                <View style={styles.row}>
+                  <View style={styles.halfInput}>
+                    <Text style={[styles.label, { color: theme.text }]}>Start Date *</Text>
+                    <TextInput style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="YYYY-MM-DD" placeholderTextColor={theme.subText} value={fromDateInput} onChangeText={setFromDateInput} maxLength={10} />
+                  </View>
+                  <View style={styles.halfInput}>
+                    <Text style={[styles.label, { color: theme.text }]}>End Date *</Text>
+                    <TextInput style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="YYYY-MM-DD" placeholderTextColor={theme.subText} value={toDateInput} onChangeText={setToDateInput} maxLength={10} />
+                  </View>
+                </View>
 
-            {safeLeavesFeed.length > 0 && (
-              <TouchableOpacity 
-                style={[styles.viewAllBtn, { borderColor: theme.primary }]}
-                onPress={() => navigation.navigate('AllLeavesFeed', { leavesList: safeLeavesFeed, currentUserRole })}
-              >
-                <Text style={{ color: theme.primary, fontWeight: 'bold', fontSize: 13 }}>
-                  View Complete History ({safeLeavesFeed.length} Items)
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
+                <Text style={[styles.label, { color: theme.text }]}>Reason for Leave *</Text>
+                <TextInput style={[styles.input, { height: 80, textAlignVertical: 'top', backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="Please explain why you need leave..." placeholderTextColor={theme.subText} value={reasonInput} onChangeText={setReasonInput} multiline />
 
-        </ScrollView>
-      </KeyboardAvoidingView>
+                <TouchableOpacity style={[styles.mainButton, { backgroundColor: theme.primary }]} onPress={handleApplyLeaveSubmission} disabled={isSubmitting}>
+                  {isSubmitting ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnText}>Submit Application</Text>}
+                </TouchableOpacity>
+              </View>
+            </KeyboardAvoidingView>
+         </View>
+      </Modal>
+
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  formWrapperBox: { padding: 16, borderRadius: 12, borderWidth: 1, marginBottom: 14 },
-  formTitle: { fontSize: 18, fontWeight: 'bold' },
-  label: { fontSize: 12, fontWeight: '600', marginBottom: 4 },
-  input: { height: 44, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, marginBottom: 10 },
+  headerSection: { padding: 16, borderBottomWidth: 1 },
+  headerTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
+  mainHeading: { fontSize: 22, fontWeight: '800' },
+  applyBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
+  filterRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  modalContent: { width: '90%', padding: 20, borderRadius: 12 },
+  modalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  modalTitle: { fontSize: 20, fontWeight: 'bold' },
+  
+  label: { fontSize: 12, fontWeight: '700', marginBottom: 6, textTransform: 'uppercase', color: '#6B7280' },
+  input: { height: 46, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, marginBottom: 15 },
   row: { flexDirection: 'row', justifyContent: 'space-between' },
   halfInput: { width: '48%' },
-  pickerWrapper: { height: 46, borderWidth: 1, borderRadius: 8, justifyContent: 'center', overflow: 'hidden', marginBottom: 10 },
-  mainButton: { height: 48, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginTop: 4 },
+  pickerWrapper: {
+  borderWidth: 1,
+  borderRadius: 8,
+  
+  height: Platform.OS === 'android' ? 50 : 45,
+},
+  mainButton: { height: 50, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginTop: 10 },
   btnText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
-  filterBarBox: { padding: 10, borderRadius: 8, borderWidth: 0.5, marginBottom: 16 },
-  miniRegistryBlock: { marginTop: 4 },
-  registryHeading: { fontSize: 16, fontWeight: 'bold', marginBottom: 12 },
-  card: { padding: 14, borderRadius: 10, borderWidth: 1, marginBottom: 12 },
-  cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
-  cardTitleText: { fontSize: 15, fontWeight: 'bold', flex: 1, marginRight: 8 },
-  statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
-  badgeText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
-  reviewContextBox: { marginTop: 6, padding: 8, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.03)', borderWidth: 0.5, borderColor: '#EEE' },
-  adminActionConsole: { marginTop: 10, borderTopWidth: 0.5, borderTopColor: '#EEE', paddingTop: 10 },
-  smallInput: { height: 38, borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, fontSize: 12, marginBottom: 8 },
+  
+  card: { padding: 16, borderRadius: 12, borderWidth: 1, marginBottom: 14, elevation: 1, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4 },
+  cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  cardTitleText: { fontSize: 16, fontWeight: 'bold', flex: 1, marginRight: 8 },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
+  badgeText: { color: '#FFF', fontSize: 11, fontWeight: '800' },
+  reviewContextBox: { marginTop: 10, padding: 10, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.03)', borderWidth: 1, borderColor: '#E5E7EB' },
+  
+  adminActionConsole: { marginTop: 15, borderTopWidth: 1, borderTopColor: '#E5E7EB', paddingTop: 15 },
+  smallInput: { height: 44, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, fontSize: 13, marginBottom: 10 },
   decisionRow: { flexDirection: 'row', justifyContent: 'flex-end' },
-  decisionBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  viewAllBtn: { borderWidth: 1, borderRadius: 8, paddingVertical: 10, alignItems: 'center', marginTop: 8, backgroundColor: 'rgba(2, 136, 209, 0.05)' },
-  emptyText: { textAlign: 'center', fontSize: 13, marginVertical: 12 },
+  decisionBtn: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  
+  emptyContainer: { alignItems: 'center', marginTop: 60 },
+  emptyText: { textAlign: 'center', fontSize: 14, marginTop: 16, fontWeight: '500' },
 });
 
 export default LeaveScreen;
