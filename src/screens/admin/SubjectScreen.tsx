@@ -1,425 +1,1016 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  TextInput, 
-  TouchableOpacity, 
-  FlatList, 
-  StyleSheet, 
-  ActivityIndicator, 
-  Alert, 
-  Switch, 
-  Keyboard, 
-  RefreshControl 
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  FlatList,
+  StyleSheet,
+  ActivityIndicator,
+  Alert,
+  Keyboard,
+  Modal,
+  RefreshControl,
+  ScrollView,
 } from 'react-native';
+
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Picker } from '@react-native-picker/picker'; // Native Dropdown Import
-
-// Theme & API Contexts
+import { Picker } from '@react-native-picker/picker';
+import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { useTheme } from '../../theme/ThemeContext';
-import { subjectApi, Subject, CreateSubjectPayload } from '../../api/subjectApi';
-import { classApi, ClassItem } from '../../api/classApi';
-import { teacherProfileApi, TeacherProfile } from '../../api/teacherProfileApi';
 
-// Is variable ko apne global runtime Auth/Redux store se connect karein
-const ACTIVE_USER_ROLE: 'admin' | 'teacher' | 'student' = 'admin';
+// API Imports
+import { subjectApi, Subject } from '../../api/subjectApi';
+import { classApi, ClassItem } from '../../api/classApi';
+import { batchApi, Batch } from '../../api/batchApi';
+import { userApi } from '../../api/userApi';
+
+const ACTIVE_USER_ROLE = 'admin';
 
 const SubjectScreen = () => {
   const { theme } = useTheme();
 
-  // ==========================================
-  // 1. DATA & LOADING STATES
-  // ==========================================
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [availableClasses, setAvailableClasses] = useState<ClassItem[]>([]);
-  const [availableTeachers, setAvailableTeachers] = useState<TeacherProfile[]>([]);
-  
+  const [availableBatches, setAvailableBatches] = useState<Batch[]>([]);
+  const [availableTeachers, setAvailableTeachers] = useState<any[]>([]);
+
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [isModalVisible, setIsModalVisible] = useState<boolean>(false);
 
-  // ==========================================
-  // 2. FORM INPUT STATES
-  // ==========================================
+  // Form States
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState<string>('');
   const [code, setCode] = useState<string>('');
   const [selectedClassId, setSelectedClassId] = useState<string>('');
+  const [selectedBatchId, setSelectedBatchId] = useState<string>('');
   const [selectedTeacherId, setSelectedTeacherId] = useState<string>('');
   const [description, setDescription] = useState<string>('');
   const [isActive, setIsActive] = useState<boolean>(true);
 
-  // Initial Boot Lifecycle
   useEffect(() => {
     fetchCoreData();
   }, []);
 
-  // Backend se Subjects, Classes aur Teachers ek saath fetch karein
   const fetchCoreData = async () => {
     setIsLoading(true);
+
     try {
-      // Parallel API calls for performance optimization
-      const [subjectRes, classRes, teacherRes] = await Promise.all([
-        ACTIVE_USER_ROLE === 'teacher' ? subjectApi.getMySubjects() : subjectApi.getAll(),
+      const [subjectRes, classRes, userRes, batchRes] = await Promise.all([
+        ACTIVE_USER_ROLE === 'teacher'
+          ? subjectApi.getMySubjects()
+          : subjectApi.getAll(),
+
         classApi.getAll(),
-        teacherProfileApi.getAll(),
+
+        userApi.getAll(),
+
+        batchApi.getAll(),
       ]);
 
+      // Subjects
+      if (subjectRes?.success) {
+        setSubjects(subjectRes.data);
+      }
 
-      if (subjectRes?.success) setSubjects(subjectRes.data);
-      if (classRes?.success) setAvailableClasses(classRes.data);
-      if (teacherRes?.success) setAvailableTeachers(teacherRes.data);
+      // Classes
+      if (classRes?.success) {
+        setAvailableClasses(classRes.data);
+      }
+
+      // Teachers Only
+      if (userRes?.success) {
+        const teachers = userRes.data.filter(
+          (user: any) =>
+            user.role === 'teacher' &&
+            user.isActive &&
+            !user.isDeleted
+        );
+
+        setAvailableTeachers(teachers);
+
+        console.log('Teachers Loaded:', teachers);
+      }
+
+      // Batches
+      if (batchRes?.success) {
+        setAvailableBatches(batchRes.data);
+      }
     } catch (error: any) {
-      Alert.alert('Network Sync Error', error.response?.data?.message || 'Failed to sync backend database feeds.');
+      Alert.alert(
+        'Sync Error',
+        'Failed to load configuration data.'
+      );
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  // Pull-to-Refresh FlatList Handler
-  const handlePullToRefresh = async () => {
-    setIsRefreshing(true);
-    try {
-      const response = ACTIVE_USER_ROLE === 'teacher' 
-        ? await subjectApi.getMySubjects() 
-        : await subjectApi.getAll();
-
-      if (response?.success) {
-        setSubjects(response.data);
-      }
-      // Silently refresh dropdown references as well
-      const classRes = await classApi.getAll();
-      const teacherRes = await teacherProfileApi.getAll();
-      if (classRes?.success) setAvailableClasses(classRes.data);
-      if (teacherRes?.success) setAvailableTeachers(teacherRes.data);
-    } catch (error: any) {
-      Alert.alert('Refresh Terminated', error.response?.data?.message || 'Unable to update records.');
-    } finally {
       setIsRefreshing(false);
     }
   };
 
-  // Clean form controls completely safely
+  const onRefresh = () => {
+    setIsRefreshing(true);
+    fetchCoreData();
+  };
+
   const resetFormState = () => {
     setEditingId(null);
+
     setName('');
     setCode('');
     setSelectedClassId('');
+    setSelectedBatchId('');
     setSelectedTeacherId('');
     setDescription('');
     setIsActive(true);
+
+    setIsModalVisible(false);
+
     Keyboard.dismiss();
   };
 
-  // Populate form with existing target parameters
   const handleTriggerEdit = (item: Subject) => {
     setEditingId(item._id);
+
     setName(item.name);
     setCode(item.code);
-    setSelectedClassId(typeof item.classId === 'object' ? item.classId._id : item.classId);
-    setSelectedTeacherId(typeof item.teacherId === 'object' ? item.teacherId._id : item.teacherId);
+
+    setSelectedClassId(
+      typeof item.classId === 'object'
+        ? item.classId._id
+        : item.classId
+    );
+
+    setSelectedBatchId(
+      typeof item.batchId === 'object'
+        ? item.batchId._id
+        : item.batchId || ''
+    );
+
+    setSelectedTeacherId(
+      typeof item.teacherId === 'object'
+        ? item.teacherId._id
+        : item.teacherId
+    );
+
     setDescription(item.description || '');
+
     setIsActive(item.isActive);
+
+    setIsModalVisible(true);
   };
 
-  // Validate parameters and push payload securely to server
   const handleSaveOrUpdate = async () => {
-    const cleanName = name.trim();
-    const cleanCode = code.trim().toUpperCase();
+    if (
+      !name.trim() ||
+      !code.trim() ||
+      !selectedClassId ||
+      !selectedBatchId ||
+      !selectedTeacherId
+    ) {
+      Alert.alert(
+        'Validation Error',
+        'Please fill all required fields.'
+      );
 
-    if (!cleanName || !cleanCode || !selectedClassId || !selectedTeacherId) {
-      Alert.alert('Input Validation', 'Please fill in all required fields and ensure valid selections for class and teacher');
       return;
     }
 
     setIsSubmitting(true);
-    const payload: CreateSubjectPayload = {
-      name: cleanName,
-      code: cleanCode,
+
+    const payload = {
+      name: name.trim(),
+      code: code.trim().toUpperCase(),
       classId: selectedClassId,
+      batchId: selectedBatchId,
       teacherId: selectedTeacherId,
       description: description.trim() || undefined,
     };
 
     try {
-      let response;
-      if (editingId) {
-        response = await subjectApi.update(editingId, { ...payload, isActive });
-      } else {
-        response = await subjectApi.create(payload);
-      }
+      const response = editingId
+        ? await subjectApi.update(editingId, {
+            ...payload,
+            isActive,
+          })
+        : await subjectApi.create(payload);
 
       if (response.success) {
-        Alert.alert('Success', editingId ? 'Subject Updated Successfully ' : 'New Subject created Successfully');
+        Alert.alert(
+          'Success',
+          editingId
+            ? 'Subject updated successfully.'
+            : 'Subject created successfully.'
+        );
+
         resetFormState();
-        fetchCoreData(); // Sync grid with updated database status
+
+        fetchCoreData();
+      } else {
+        Alert.alert(
+          'Error',
+          response.message || 'Operation failed.'
+        );
       }
     } catch (error: any) {
-      Alert.alert('Transaction Rejected', error.response?.data?.message || 'Server action validation drop.');
+      const backendError =
+        error.response?.data?.message ||
+        error.response?.data?.error ||
+        'Unknown Server Error';
+
+      Alert.alert(
+        'Transaction Blocked',
+        backendError
+      );
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Soft Delete Trigger mapped directly to backend controller security checks
   const handleDelete = (id: string) => {
     Alert.alert(
-      'Confirm Deletion',
-      'Do you really want to remove this subject',
+      'Delete Subject',
+      'Are you sure you want to delete this subject?',
       [
-        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
         {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
             try {
-              const response = await subjectApi.delete(id);
-              if (response.success) {
-                if (editingId === id) resetFormState();
-                // Refresh records locally
-                const res = ACTIVE_USER_ROLE === 'teacher' ? await subjectApi.getMySubjects() : await subjectApi.getAll();
-                if (res?.success) setSubjects(res.data);
+              const res = await subjectApi.delete(id);
+
+              if (res.success) {
+                fetchCoreData();
               }
-            } catch (error: any) {
-              Alert.alert('Wipe Interrupted', error.response?.data?.message || 'Database block process terminated.');
+            } catch (e) {
+              Alert.alert(
+                'Error',
+                'Could not delete subject.'
+              );
             }
-          }
-        }
+          },
+        },
       ]
     );
   };
 
-  // Dynamic Item Card Template Builder
-  const renderSubjectCard = ({ item }: { item: Subject }) => {
-    const isAdmin = ACTIVE_USER_ROLE === 'admin';
-    
-    // Unbox populated relational object references seamlessly
-    const className = typeof item.classId === 'object' ? item.classId.name : 'Unknown Class';
-    const teacherName = typeof item.teacherId === 'object' 
-      ? `${item.teacherId.firstName} ${item.teacherId.lastName}` 
-      : 'Unmapped Instructor ID';
+  // Filter batches according to class
+  const filteredBatches = availableBatches.filter(
+    (batch) => {
+      if (!selectedClassId) return false;
 
-    return (
-      <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <View style={styles.cardHeader}>
-          <Text style={[styles.cardTitle, { color: theme.text }]} numberOfLines={1}>
-            {item.name} <Text style={{ color: theme.primary, fontWeight: 'bold' }}>({item.code})</Text>
+      const batchClassId =
+        typeof batch.classId === 'object'
+          ? batch.classId?._id
+          : batch.classId;
+
+      return batchClassId === selectedClassId;
+    }
+  );
+
+  const renderSubjectCard = ({
+    item,
+  }: {
+    item: Subject;
+  }) => (
+    <View
+      style={[
+        styles.card,
+        {
+          backgroundColor: theme.surface,
+          borderColor: theme.border,
+        },
+      ]}
+    >
+      <View style={styles.cardHeader}>
+        <Text
+          style={[
+            styles.cardTitle,
+            { color: theme.text },
+          ]}
+          numberOfLines={1}
+        >
+          {item.name}{' '}
+          <Text
+            style={{
+              color: theme.subText,
+              fontSize: 13,
+            }}
+          >
+            ({item.code})
           </Text>
-          
-          <View style={[styles.badge, { backgroundColor: item.isActive ? theme.primary : '#757575' }]}>
-            <Text style={styles.badgeText}>{item.isActive ? 'Active' : 'Inactive'}</Text>
-          </View>
+        </Text>
+
+        <View
+          style={[
+            styles.badge,
+            {
+              backgroundColor: item.isActive
+                ? theme.primary + '20'
+                : '#E5E7EB',
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.badgeText,
+              {
+                color: item.isActive
+                  ? theme.primary
+                  : '#6B7280',
+              },
+            ]}
+          >
+            {item.isActive
+              ? 'Active'
+              : 'Inactive'}
+          </Text>
         </View>
-
-        {item.description ? <Text style={[styles.descText, { color: theme.text }]}>{item.description}</Text> : null}
-
-        <View style={styles.gridRow}>
-          <Text style={[styles.infoText, { color: theme.subText }]}>Class: <Text style={{ fontWeight: '600', color: theme.text }}>{className}</Text></Text>
-          <Text style={[styles.infoText, { color: theme.subText }]}>Instructor: <Text style={{ fontWeight: '500', color: theme.text }}>{teacherName}</Text></Text>
-        </View>
-
-        {/* Expose execution actions strictly to Administrative Profiles */}
-        {isAdmin && (
-          <View style={styles.actionRow}>
-            <TouchableOpacity onPress={() => handleTriggerEdit(item)} style={styles.actionButton}>
-              <Text style={[styles.editText, { color: theme.primary }]}>Edit</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={() => handleDelete(item._id)} style={styles.actionButton}>
-              <Text style={styles.deleteText}>Delete</Text>
-            </TouchableOpacity>
-          </View>
-        )}
       </View>
-    );
-  };
 
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['bottom']}>
-      
-      {/* 1. ADMINISTRATION CONFIGURATION MODULE */}
+      <Text
+        style={[
+          styles.infoText,
+          { color: theme.subText },
+        ]}
+      >
+        Class:{' '}
+        <Text
+          style={{
+            fontWeight: '600',
+            color: theme.text,
+          }}
+        >
+          {typeof item.classId === 'object'
+            ? item.classId.name
+            : 'N/A'}
+        </Text>{' '}
+        | Batch:{' '}
+        <Text
+          style={{
+            fontWeight: '600',
+            color: theme.text,
+          }}
+        >
+          {typeof item.batchId === 'object'
+            ? item.batchId.name
+            : 'N/A'}
+        </Text>
+      </Text>
+
       {ACTIVE_USER_ROLE === 'admin' && (
-        <View style={[styles.formCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <View style={styles.formHeaderRow}>
-            <Text style={[styles.formTitle, { color: theme.text }]}>
-              {editingId ? 'Modify Subject Parameters' : 'Add New Subject'}
+        <View style={styles.actionRow}>
+          <TouchableOpacity
+            onPress={() => handleTriggerEdit(item)}
+            style={styles.actionButton}
+          >
+            <Text
+              style={{
+                color: theme.primary,
+                fontWeight: '700',
+              }}
+            >
+              Edit
             </Text>
-            {editingId && (
-              <TouchableOpacity onPress={resetFormState}>
-                <Text style={styles.cancelText}>Cancel Edit</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {/* BASIC INPUT ROWS */}
-          <View style={styles.rowWrapper}>
-            <View style={styles.halfInput}>
-              <Text style={[styles.inputLabel, { color: theme.text }]}>Subject Name</Text>
-              <TextInput
-                style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]}
-                placeholder="e.g. Mathematics"
-                placeholderTextColor={theme.subText}
-                value={name}
-                onChangeText={setName}
-              />
-            </View>
-
-            <View style={styles.halfInput}>
-              <Text style={[styles.inputLabel, { color: theme.text }]}>Subject Code</Text>
-              <TextInput
-                style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]}
-                placeholder="MATH101"
-                placeholderTextColor={theme.subText}
-                value={code}
-                onChangeText={setCode}
-                autoCapitalize="characters"
-              />
-            </View>
-          </View>
-
-          {/* NATIVE PICKER DROPDOWNS */}
-          <View style={styles.pickerContainer}>
-            <Text style={[styles.inputLabel, { color: theme.text }]}>Select Class</Text>
-            <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border }]}>
-              <Picker
-                selectedValue={selectedClassId}
-                onValueChange={(itemValue) => setSelectedClassId(itemValue)}
-                dropdownIconColor={theme.primary}
-                style={{ color: theme.text }}
-              >
-                <Picker.Item label="-- assigned
-                Class --" value="" color={theme.subText} />
-                {availableClasses.map((cls) => (
-                  <Picker.Item key={cls._id} label={cls.name} value={cls._id} />
-                ))}
-              </Picker>
-            </View>
-          </View>
-
-          <View style={styles.pickerContainer}>
-            <Text style={[styles.inputLabel, { color: theme.text }]}>Assigned Instructor</Text>
-            <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border }]}>
-              <Picker
-                selectedValue={selectedTeacherId}
-                onValueChange={(itemValue) => setSelectedTeacherId(itemValue)}
-                dropdownIconColor={theme.primary}
-                style={{ color: theme.text }}
-              >
-                <Picker.Item label="-- assigned Teacher --" value="" color={theme.subText} />
-                {availableTeachers.map((teacher) => {
-                  // Resolve embedded teacher user data attributes cleanly
-                  const targetUser = typeof teacher.userId === 'object' ? teacher.userId : null;
-                  const displayString = targetUser 
-                    ? `${targetUser.firstName} ${targetUser.lastName}` 
-                    : `Profile GUID (${teacher._id.slice(-6)})`;
-
-                  return (
-                    <Picker.Item 
-                      key={teacher._id} 
-                      label={`${displayString} — ${teacher.qualification}`} 
-                      value={typeof targetUser === 'object' && targetUser ? targetUser._id : teacher._id} 
-                    />
-                  );
-                })}
-              </Picker>
-            </View>
-          </View>
-
-          <Text style={[styles.inputLabel, { color: theme.text }]}>Description</Text>
-          <TextInput
-            style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]}
-            placeholder="Description info strings"
-            placeholderTextColor={theme.subText}
-            value={description}
-            onChangeText={setDescription}
-          />
-
-          {editingId && (
-            <View style={styles.switchRow}>
-              <Text style={{ color: theme.text, fontWeight: '500' }}>System Record Activity State</Text>
-              <Switch value={isActive} onValueChange={setIsActive} thumbColor={theme.primary} />
-            </View>
-          )}
+          </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.mainButton, { backgroundColor: theme.primary }]}
-            onPress={handleSaveOrUpdate}
-            disabled={isSubmitting}
+            onPress={() => handleDelete(item._id)}
+            style={styles.actionButton}
           >
-            {isSubmitting ? (
-              <ActivityIndicator color="#FFF" />
-            ) : (
-              <Text style={styles.btnText}>{editingId ? 'Update ' : 'Save'}</Text>
-            )}
+            <Text
+              style={{
+                color: '#EF4444',
+                fontWeight: '700',
+              }}
+            >
+              Delete
+            </Text>
           </TouchableOpacity>
         </View>
       )}
+    </View>
+  );
 
-      {/* 2. FLATLIST RENDERED SYLLABUS REGISTRY */}
-      <Text style={[styles.listHeader, { color: theme.text }]}>Subjects</Text>
-
-      {isLoading ? (
-        <ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 40 }} />
-      ) : (
-        <FlatList
-          data={subjects}
-          keyExtractor={(item) => item._id}
-          renderItem={renderSubjectCard}
-          contentContainerStyle={styles.listContent}
-          refreshControl={
-            <RefreshControl 
-              refreshing={isRefreshing} 
-              onRefresh={handlePullToRefresh} 
-              colors={[theme.primary]} 
-              tintColor={theme.primary} 
-            />
-          }
-          ListEmptyComponent={
-            <Text style={[styles.emptyText, { color: theme.subText }]}>No active topic dependencies discovered matching this view context.</Text>
-          }
+  if (isLoading) {
+    return (
+      <View
+        style={[
+          styles.loaderContainer,
+          {
+            backgroundColor: theme.background,
+          },
+        ]}
+      >
+        <ActivityIndicator
+          size="large"
+          color={theme.primary}
         />
-      )}
+      </View>
+    );
+  }
+
+  return (
+    <SafeAreaView
+      style={[
+        styles.container,
+        {
+          backgroundColor: theme.background,
+        },
+      ]}
+      edges={['bottom']}
+    >
+      <View style={styles.headerArea}>
+        <Text
+          style={[
+            styles.listHeader,
+            { color: theme.text },
+          ]}
+        >
+          All Subjects
+        </Text>
+
+        {ACTIVE_USER_ROLE === 'admin' && (
+          <TouchableOpacity
+            style={[
+              styles.createBtn,
+              {
+                backgroundColor: theme.primary,
+              },
+            ]}
+            onPress={() =>
+              setIsModalVisible(true)
+            }
+          >
+            <Text
+              style={{
+                color: '#FFF',
+                fontWeight: 'bold',
+              }}
+            >
+              + New Subject
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* MODAL */}
+      <Modal
+        visible={isModalVisible}
+        animationType="fade"
+        transparent
+      >
+        <View style={styles.modalOverlay}>
+          <View
+            style={[
+              styles.modalContent,
+              {
+                backgroundColor: theme.surface,
+              },
+            ]}
+          >
+            <View style={styles.formHeaderRow}>
+              <Text
+                style={[
+                  styles.formTitle,
+                  { color: theme.text },
+                ]}
+              >
+                {editingId
+                  ? 'Edit Subject'
+                  : 'Add Subject'}
+              </Text>
+
+              <TouchableOpacity
+                onPress={resetFormState}
+              >
+                <MaterialIcons
+                  name="close"
+                  size={24}
+                  color={theme.text}
+                />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+            >
+              {/* NAME + CODE */}
+              <View style={styles.row}>
+                <View style={styles.halfInput}>
+                  <Text
+                    style={[
+                      styles.inputLabel,
+                      {
+                        color: theme.subText,
+                      },
+                    ]}
+                  >
+                    SUBJECT NAME{' '}
+                    <Text style={styles.requiredStar}>
+                      *
+                    </Text>
+                  </Text>
+
+                  <TextInput
+                    style={[
+                      styles.input,
+                      {
+                        backgroundColor:
+                          theme.background,
+                        color: theme.text,
+                        borderColor: theme.border,
+                      },
+                    ]}
+                    placeholder="Mathematics"
+                    placeholderTextColor="#9CA3AF"
+                    value={name}
+                    onChangeText={setName}
+                  />
+                </View>
+
+                <View style={styles.halfInput}>
+                  <Text
+                    style={[
+                      styles.inputLabel,
+                      {
+                        color: theme.subText,
+                      },
+                    ]}
+                  >
+                    SUBJECT CODE{' '}
+                    <Text style={styles.requiredStar}>
+                      *
+                    </Text>
+                  </Text>
+
+                  <TextInput
+                    style={[
+                      styles.input,
+                      {
+                        backgroundColor:
+                          theme.background,
+                        color: theme.text,
+                        borderColor: theme.border,
+                      },
+                    ]}
+                    placeholder="MATH101"
+                    placeholderTextColor="#9CA3AF"
+                    value={code}
+                    onChangeText={setCode}
+                  />
+                </View>
+              </View>
+
+              {/* CLASS */}
+              <Text
+                style={[
+                  styles.inputLabel,
+                  {
+                    color: theme.subText,
+                  },
+                ]}
+              >
+                CLASS{' '}
+                <Text style={styles.requiredStar}>
+                  *
+                </Text>
+              </Text>
+
+              <View
+                style={[
+                  styles.pickerWrapper,
+                  {
+                    backgroundColor:
+                      theme.background,
+                    borderColor: theme.border,
+                  },
+                ]}
+              >
+                <Picker
+                  selectedValue={selectedClassId}
+                  onValueChange={(value) => {
+                    setSelectedClassId(value);
+                    setSelectedBatchId('');
+                    setSelectedTeacherId('');
+                  }}
+                  style={{ color: theme.text }}
+                >
+                  <Picker.Item
+                    label="Select class"
+                    value=""
+                    color="#9CA3AF"
+                  />
+
+                  {availableClasses.map((c) => (
+                    <Picker.Item
+                      key={c._id}
+                      label={c.name}
+                      value={c._id}
+                    />
+                  ))}
+                </Picker>
+              </View>
+
+              {/* BATCH */}
+              <Text
+                style={[
+                  styles.inputLabel,
+                  {
+                    color: theme.subText,
+                  },
+                ]}
+              >
+                BATCH{' '}
+                <Text style={styles.requiredStar}>
+                  *
+                </Text>
+              </Text>
+
+              <View
+                style={[
+                  styles.pickerWrapper,
+                  {
+                    backgroundColor:
+                      theme.background,
+                    borderColor: theme.border,
+                    opacity: selectedClassId
+                      ? 1
+                      : 0.5,
+                  },
+                ]}
+              >
+                <Picker
+                  selectedValue={selectedBatchId}
+                  onValueChange={(value) => {
+                    setSelectedBatchId(value);
+                    setSelectedTeacherId('');
+                  }}
+                  enabled={!!selectedClassId}
+                  style={{ color: theme.text }}
+                >
+                  <Picker.Item
+                    label={
+                      selectedClassId
+                        ? 'Select batch'
+                        : 'Select class first'
+                    }
+                    value=""
+                    color="#9CA3AF"
+                  />
+
+                  {filteredBatches.map((b) => (
+                    <Picker.Item
+                      key={b._id}
+                      label={b.name}
+                      value={b._id}
+                    />
+                  ))}
+                </Picker>
+              </View>
+
+              {/* TEACHER */}
+              <Text
+                style={[
+                  styles.inputLabel,
+                  {
+                    color: theme.subText,
+                  },
+                ]}
+              >
+                ASSIGNED TEACHER{' '}
+                <Text style={styles.requiredStar}>
+                  *
+                </Text>
+              </Text>
+
+              <View
+                style={[
+                  styles.pickerWrapper,
+                  {
+                    backgroundColor:
+                      theme.background,
+                    borderColor: theme.border,
+                    opacity: selectedBatchId
+                      ? 1
+                      : 0.5,
+                  },
+                ]}
+              >
+                <Picker
+                  selectedValue={selectedTeacherId}
+                  onValueChange={setSelectedTeacherId}
+                  enabled={!!selectedBatchId}
+                  style={{ color: theme.text }}
+                >
+                  <Picker.Item
+                    label={
+                      selectedBatchId
+                        ? 'Select teacher'
+                        : 'Select batch first'
+                    }
+                    value=""
+                    color="#9CA3AF"
+                  />
+
+                  {availableTeachers.map(
+                    (teacher: any) => (
+                      <Picker.Item
+                        key={teacher._id}
+                        label={`${teacher.firstName} ${teacher.lastName}`}
+                        value={teacher._id}
+                      />
+                    )
+                  )}
+                </Picker>
+              </View>
+
+              {/* DESCRIPTION */}
+              <Text
+                style={[
+                  styles.inputLabel,
+                  {
+                    color: theme.subText,
+                  },
+                ]}
+              >
+                DESCRIPTION
+              </Text>
+
+              <TextInput
+                style={[
+                  styles.input,
+                  styles.textArea,
+                  {
+                    backgroundColor:
+                      theme.background,
+                    color: theme.text,
+                    borderColor: theme.border,
+                  },
+                ]}
+                placeholder="Enter subject description..."
+                placeholderTextColor="#9CA3AF"
+                value={description}
+                onChangeText={setDescription}
+                multiline
+                numberOfLines={4}
+              />
+
+              {/* BUTTONS */}
+              <View style={styles.footerButtons}>
+                <TouchableOpacity
+                  style={[
+                    styles.cancelBtn,
+                    {
+                      borderColor: theme.border,
+                    },
+                  ]}
+                  onPress={resetFormState}
+                >
+                  <Text
+                    style={{
+                      color: theme.text,
+                      fontWeight: '600',
+                    }}
+                  >
+                    Cancel
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.saveBtn,
+                    {
+                      backgroundColor:
+                        theme.primary,
+                    },
+                  ]}
+                  onPress={handleSaveOrUpdate}
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? (
+                    <ActivityIndicator
+                      size="small"
+                      color="#FFF"
+                    />
+                  ) : (
+                    <Text
+                      style={{
+                        color: '#FFF',
+                        fontWeight: 'bold',
+                      }}
+                    >
+                      {editingId
+                        ? 'Update'
+                        : 'Save'}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* LIST */}
+      <FlatList
+        data={subjects}
+        keyExtractor={(item) => item._id}
+        renderItem={renderSubjectCard}
+        contentContainerStyle={{
+          paddingBottom: 20,
+        }}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={onRefresh}
+          />
+        }
+      />
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  
-  // Custom Setup Interface Layout Guidelines
-  formCard: { margin: 16, padding: 16, borderRadius: 12, borderWidth: 1 },
-  formHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  formTitle: { fontSize: 18, fontWeight: 'bold' },
-  cancelText: { color: '#D32F2F', fontWeight: '600', fontSize: 14 },
-  inputLabel: { fontSize: 12, fontWeight: '600', marginBottom: 4 },
-  input: { height: 44, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, marginBottom: 12 },
-  rowWrapper: { flexDirection: 'row', justifyContent: 'space-between' },
-  halfInput: { width: '48%' },
-  
-  // Custom Styling for Native Picker Anchors
-  pickerContainer: { marginBottom: 12 },
-  pickerWrapper: { height: 46, borderWidth: 1, borderRadius: 8, justifyContent: 'center', overflow: 'hidden' },
-  
-  switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 6 },
-  mainButton: { height: 48, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginTop: 12 },
-  btnText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
-  
-  // Registry Grid Structure Mapping
-  listHeader: { fontSize: 18, fontWeight: 'bold', marginHorizontal: 16, marginTop: 8, marginBottom: 8 },
-  listContent: { paddingHorizontal: 16, paddingBottom: 24 },
-  card: { padding: 16, borderRadius: 10, borderWidth: 1, marginBottom: 12 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  cardTitle: { fontSize: 16, fontWeight: 'bold', flex: 1 },
-  badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
-  badgeText: { color: '#FFF', fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase' },
-  descText: { fontSize: 13, marginBottom: 8 },
-  gridRow: { flexDirection: 'row', justifyContent: 'space-between', paddingTop: 4 },
-  infoText: { fontSize: 12, fontWeight: '500' },
-  actionRow: { flexDirection: 'row', justifyContent: 'flex-end', borderTopWidth: 0.5, borderTopColor: '#DDD', paddingTop: 10, marginTop: 10 },
-  actionButton: { marginLeft: 16, paddingVertical: 4 },
-  editText: { fontWeight: 'bold', fontSize: 14 },
-  deleteText: { color: '#D32F2F', fontWeight: 'bold', fontSize: 14 },
-  emptyText: { textAlign: 'center', marginTop: 30, fontSize: 15 },
+  container: {
+    flex: 1,
+  },
+
+  loaderContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  headerArea: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+  },
+
+  listHeader: {
+    fontSize: 22,
+    fontWeight: 'bold',
+  },
+
+  createBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+
+  card: {
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginHorizontal: 16,
+    marginBottom: 12,
+  },
+
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    flex: 1,
+  },
+
+  badge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+
+  badgeText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+
+  infoText: {
+    fontSize: 14,
+    marginTop: 4,
+  },
+
+  actionRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+    paddingTop: 12,
+  },
+
+  actionButton: {
+    marginLeft: 24,
+  },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    padding: 16,
+  },
+
+  modalContent: {
+    padding: 24,
+    borderRadius: 16,
+    maxHeight: '90%',
+  },
+
+  formHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 24,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+
+  formTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+  },
+
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+
+  halfInput: {
+    width: '48%',
+  },
+
+  inputLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+    marginTop: 4,
+  },
+
+  requiredStar: {
+    color: '#EF4444',
+  },
+
+  input: {
+    height: 46,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+    fontSize: 14,
+  },
+
+  textArea: {
+    height: 100,
+    textAlignVertical: 'top',
+    paddingTop: 14,
+  },
+
+  pickerWrapper: {
+    height: 46,
+    borderWidth: 1,
+    borderRadius: 10,
+    marginBottom: 16,
+    justifyContent: 'center',
+  },
+
+  footerButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+    paddingTop: 20,
+  },
+
+  cancelBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginRight: 12,
+  },
+
+  saveBtn: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 10,
+    minWidth: 90,
+    alignItems: 'center',
+  },
 });
 
 export default SubjectScreen;

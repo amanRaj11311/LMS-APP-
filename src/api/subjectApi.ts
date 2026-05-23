@@ -5,6 +5,7 @@ export interface Subject {
   name: string;
   code: string;
   classId: { _id: string; name: string } | string;
+  batchId: { _id: string; name: string } | string; // 🌟 ADDED: For Batch integration
   teacherId: { _id: string; firstName: string; lastName: string; email: string } | string;
   description?: string;
   isActive: boolean;
@@ -14,6 +15,7 @@ export interface CreateSubjectPayload {
   name: string;
   code: string;
   classId: string;
+  batchId: string; // 🌟 ADDED: Payload requirement
   teacherId: string;
   description?: string;
 }
@@ -49,4 +51,10 @@ export const subjectApi = {
     const response = await apiClient.delete(`/api/subjects/${id}`);
     return response.data;
   },
+  
+  // 🌟 Added: Recovery endpoint as per your API documentation
+  recover: async (id: string) => {
+    const response = await apiClient.patch(`/api/subjects/${id}/recover`);
+    return response.data;
+  }
 };
