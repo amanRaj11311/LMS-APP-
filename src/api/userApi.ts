@@ -39,10 +39,18 @@ export const userApi = {
     return response.data;
   },
 
-  update: async (payload: Partial<CreateUserPayload> & { id: string }) => {
-    const response = await apiClient.put('/api/users', payload);
-    return response.data;
-  },
+  update: async ({
+  id,
+  ...payload
+}: Partial<CreateUserPayload> & { id: string }) => {
+
+  const response = await apiClient.put(
+    `/api/users/${id}`,
+    payload,
+  );
+
+  return response.data;
+},
 
   delete: async (id: string) => {
     const response = await apiClient.delete(`/api/users/${id}`);
