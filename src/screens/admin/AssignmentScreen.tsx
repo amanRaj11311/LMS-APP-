@@ -1,7 +1,8 @@
 import React, { useState, useCallback } from 'react';
 import { 
   View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, 
-  ActivityIndicator, Alert, Switch, Keyboard, RefreshControl, Platform, Modal, ScrollView
+  ActivityIndicator, Alert, Switch, Keyboard, RefreshControl, Platform, Modal, ScrollView,
+  Linking // 🌟 Added Linking to open file URLs
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Picker } from '@react-native-picker/picker';
@@ -14,10 +15,10 @@ import { useTheme } from '../../theme/ThemeContext';
 import { assignmentApi, Assignment, CreateAssignmentPayload } from '../../api/assignmentApi';
 import { subjectApi, Subject } from '../../api/subjectApi';
 import { batchApi, Batch } from '../../api/batchApi';
-import { classApi } from '../../api/classApi'; // Assuming class API exists
+import { classApi } from '../../api/classApi'; 
 
 const AssignmentScreen = ({ navigation }: { navigation: any }) => {
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme(); 
 
   const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'teacher' | 'student'>('student');
   const [currentUserId, setCurrentUserId] = useState<string>('');
@@ -41,11 +42,14 @@ const AssignmentScreen = ({ navigation }: { navigation: any }) => {
   const [description, setDescription] = useState<string>('');
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>('');
   const [selectedBatchId, setSelectedBatchId] = useState<string>('');
-  const [selectedClassId, setSelectedClassId] = useState<string>(''); // For UI matching
+  const [selectedClassId, setSelectedClassId] = useState<string>(''); 
   const [dueDateText, setDueDateText] = useState<string>('2026-05-15');
   const [totalMarksText, setTotalMarksText] = useState<string>('100');
   const [isActive, setIsActive] = useState<boolean>(true);
   const [teacherFiles, setTeacherFiles] = useState<any[]>([]);
+  
+  // 🌟 Added: Track already uploaded files when editing
+  const [existingAttachments, setExistingAttachments] = useState<string[]>([]);
 
   // Student Submission States
   const [selectedAssignmentForSubmission, setSelectedAssignmentForSubmission] = useState<Assignment | null>(null);
@@ -117,6 +121,7 @@ const AssignmentScreen = ({ navigation }: { navigation: any }) => {
     setSelectedSubjectId(''); setSelectedBatchId(''); setSelectedClassId('');
     setDueDateText('2026-05-15'); setTotalMarksText('100'); setIsActive(true);
     setTeacherFiles([]); 
+    setExistingAttachments([]); // 🌟 Reset existing files state
   };
 
   const resetSubmitForm = () => {
@@ -163,6 +168,7 @@ const AssignmentScreen = ({ navigation }: { navigation: any }) => {
     setTotalMarksText(item.totalMarks.toString());
     setIsActive(item.isActive !== undefined ? item.isActive : true);
     setTeacherFiles([]); 
+    setExistingAttachments(item.attachments || []); // 🌟 Load previously uploaded files
     setIsCreateModalVisible(true);
   };
 
@@ -189,6 +195,9 @@ const AssignmentScreen = ({ navigation }: { navigation: any }) => {
         finalAttachmentUrls = uploadRes?.data?.fileUrls || uploadRes?.urls || [];
       }
 
+      // 🌟 Combine existing files and new files
+      const allAttachments = [...existingAttachments, ...finalAttachmentUrls];
+
       const payload: CreateAssignmentPayload = {
         title: title.trim(),
         description: description.trim(),
@@ -196,7 +205,7 @@ const AssignmentScreen = ({ navigation }: { navigation: any }) => {
         batchId: selectedBatchId,
         dueDate: new Date(dueDateText.trim()).toISOString(),
         totalMarks: parseInt(totalMarksText.trim(), 10),
-        attachments: finalAttachmentUrls.length > 0 ? finalAttachmentUrls : undefined,
+        attachments: allAttachments.length > 0 ? allAttachments : undefined,
       };
 
       if (editingId) await assignmentApi.update(editingId, { ...payload, isActive });
@@ -288,17 +297,30 @@ const AssignmentScreen = ({ navigation }: { navigation: any }) => {
           <Text style={[styles.infoText, { color: theme.subText }]}>Due: {item.dueDate.split('T')[0]}</Text>
         </View>
 
+        {/* 🌟 View Attachments Feature inside the card */}
+        {item.attachments && item.attachments.length > 0 && (
+          <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 0.5, borderTopColor: '#DDD' }}>
+            <Text style={{ fontSize: 12, fontWeight: 'bold', color: theme.text, marginBottom: 4 }}>Attached Files:</Text>
+            {item.attachments.map((url, idx) => (
+              <TouchableOpacity key={idx} onPress={() => Linking.openURL(url)} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                <MaterialIcons name="attach-file" size={14} color={theme.primary} />
+                <Text style={{ color: theme.primary, fontSize: 12, marginLeft: 4 }}>View File {idx + 1}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
         {currentUserRole !== 'student' ? (
           <View style={styles.actionRow}>
             {canManage && (
               <>
-                <TouchableOpacity onPress={() => navigation.navigate('AssignmentSubmissions', { assignmentId: item._id, assignmentTitle: item.title, totalMarks: item.totalMarks })} style={[styles.actionButton, { borderColor: '#10B981', borderWidth: 1, backgroundColor: 'rgba(16, 185, 129, 0.1)' }]}>
+                <TouchableOpacity onPress={() => navigation.navigate('AssignmentSubmissions', { assignmentId: item._id, assignmentTitle: item.title, totalMarks: item.totalMarks })} style={[styles.actionButton, { borderColor: '#10B981', borderWidth: 1, backgroundColor: isDark ? 'transparent' : 'rgba(16, 185, 129, 0.1)' }]}>
                   <Text style={{ color: '#10B981', fontWeight: 'bold', fontSize: 13 }}>View Submissions</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => handleTriggerEdit(item)} style={[styles.actionButton, { borderWidth: 1, borderColor: theme.border }]}>
                   <Text style={{ color: theme.primary, fontWeight: 'bold' }}>Edit</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => handleDelete(item._id)} style={[styles.actionButton, { borderWidth: 1, borderColor: '#FEE2E2', backgroundColor: '#FEF2F2' }]}>
+                <TouchableOpacity onPress={() => handleDelete(item._id)} style={[styles.actionButton, { borderWidth: 1, borderColor: '#FEE2E2', backgroundColor: isDark ? 'transparent' : '#FEF2F2' }]}>
                   <Text style={{ color: '#D32F2F', fontWeight: 'bold' }}>Delete</Text>
                 </TouchableOpacity>
               </>
@@ -315,7 +337,7 @@ const AssignmentScreen = ({ navigation }: { navigation: any }) => {
                   )}
                 </View>
                 {item.mySubmission.feedback && (
-                  <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#EEE' }}>
+                  <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: theme.border }}>
                     <Text style={{ fontSize: 13, color: theme.subText }}><Text style={{ fontWeight: 'bold', color: theme.text }}>Feedback: </Text>{item.mySubmission.feedback}</Text>
                   </View>
                 )}
@@ -332,7 +354,7 @@ const AssignmentScreen = ({ navigation }: { navigation: any }) => {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['bottom']}>
       {/* HEADER */}
       <View style={styles.header}>
         <Text style={[styles.mainTitle, { color: theme.text }]}>Assignments</Text>
@@ -344,7 +366,7 @@ const AssignmentScreen = ({ navigation }: { navigation: any }) => {
       </View>
 
       {/* FEED LIST */}
-      {isLoading ? <ActivityIndicator size="large" style={{ marginTop: 50 }} /> : (
+      {isLoading ? <ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 50 }} /> : (
         <FlatList
           data={assignments}
           keyExtractor={(item) => item._id}
@@ -365,48 +387,91 @@ const AssignmentScreen = ({ navigation }: { navigation: any }) => {
             </View>
             <ScrollView showsVerticalScrollIndicator={false}>
               
-              <Text style={styles.label}>TITLE *</Text>
-              <TextInput style={[styles.input, { borderColor: theme.border, color: theme.text }]} placeholder="Chapter 5 Exercise" placeholderTextColor={theme.subText} value={title} onChangeText={setTitle} />
+              <Text style={[styles.label, { color: theme.text }]}>TITLE *</Text>
+              <TextInput style={[styles.input, { borderColor: theme.border, color: theme.text, backgroundColor: theme.background }]} placeholder="Chapter 5 Exercise" placeholderTextColor={theme.subText} value={title} onChangeText={setTitle} />
               
-              <Text style={styles.label}>DESCRIPTION *</Text>
-              <TextInput style={[styles.input, { height: 80, textAlignVertical: 'top', borderColor: theme.border, color: theme.text }]} placeholder="Add instructions..." placeholderTextColor={theme.subText} value={description} onChangeText={setDescription} multiline />
+              <Text style={[styles.label, { color: theme.text }]}>DESCRIPTION *</Text>
+              <TextInput style={[styles.input, { height: 80, textAlignVertical: 'top', borderColor: theme.border, color: theme.text, backgroundColor: theme.background }]} placeholder="Add instructions..." placeholderTextColor={theme.subText} value={description} onChangeText={setDescription} multiline />
 
               <View style={styles.row}>
                 <View style={styles.halfWidth}>
-                  <Text style={styles.label}>CLASS *</Text>
-                  <View style={[styles.pickerWrapper, { borderColor: theme.border }]}><Picker selectedValue={selectedClassId} onValueChange={setSelectedClassId}><Picker.Item label="Select class" value="" />{availableClasses.map(c => <Picker.Item key={c._id} label={c.name} value={c._id} />)}</Picker></View>
+                  <Text style={[styles.label, { color: theme.text }]}>CLASS *</Text>
+                  <View style={[styles.pickerWrapper, { borderColor: theme.border, backgroundColor: theme.background }]}>
+                    <Picker 
+                      selectedValue={selectedClassId}  
+                      onValueChange={setSelectedClassId}
+                      style={{ color: theme.text }} 
+                      itemStyle={{ color: theme.text }} 
+                      dropdownIconColor={theme.text}
+                    >
+                      <Picker.Item label="Select class" value="" color={theme.subText} />
+                      {availableClasses.map(c => <Picker.Item key={c._id} label={c.name} value={c._id} />)}
+                    </Picker>
+                  </View>
                 </View>
                 <View style={styles.halfWidth}>
-                  <Text style={styles.label}>BATCH *</Text>
-                  <View style={[styles.pickerWrapper, { borderColor: theme.border }]}><Picker selectedValue={selectedBatchId} onValueChange={setSelectedBatchId}><Picker.Item label="Select batch" value="" />{availableBatches.map(b => <Picker.Item key={b._id} label={b.name} value={b._id} />)}</Picker></View>
+                  <Text style={[styles.label, { color: theme.text }]}>BATCH *</Text>
+                  <View style={[styles.pickerWrapper, { borderColor: theme.border, backgroundColor: theme.background }]}>
+                    <Picker 
+                      selectedValue={selectedBatchId} 
+                      onValueChange={setSelectedBatchId}
+                      style={{ color: theme.text }} 
+                      itemStyle={{ color: theme.text }} 
+                      dropdownIconColor={theme.text}
+                    >
+                      <Picker.Item label="Select batch" value="" color={theme.subText} />
+                      {availableBatches.map(b => <Picker.Item key={b._id} label={b.name} value={b._id} />)}
+                    </Picker>
+                  </View>
                 </View>
               </View>
 
-              <Text style={styles.label}>SUBJECT *</Text>
-              <View style={[styles.pickerWrapper, { borderColor: theme.border }]}><Picker selectedValue={selectedSubjectId} onValueChange={setSelectedSubjectId}><Picker.Item label="Select subject" value="" />{availableSubjects.map(s => <Picker.Item key={s._id} label={s.name} value={s._id} />)}</Picker></View>
+              <Text style={[styles.label, { color: theme.text }]}>SUBJECT *</Text>
+              <View style={[styles.pickerWrapper, { borderColor: theme.border, backgroundColor: theme.background }]}>
+                <Picker 
+                  selectedValue={selectedSubjectId} 
+                  onValueChange={setSelectedSubjectId}
+                  style={{ color: theme.text }} 
+                  itemStyle={{ color: theme.text }} 
+                  dropdownIconColor={theme.text}
+                >
+                  <Picker.Item label="Select subject" value="" color={theme.subText} />
+                  {availableSubjects.map(s => <Picker.Item key={s._id} label={s.name} value={s._id} />)}
+                </Picker>
+              </View>
 
               <View style={styles.row}>
                 <View style={styles.halfWidth}>
-                  <Text style={styles.label}>DUE DATE *</Text>
-                  <TextInput style={[styles.input, { borderColor: theme.border, color: theme.text }]} placeholder="dd/mm/yyyy" placeholderTextColor={theme.subText} value={dueDateText} onChangeText={setDueDateText} />
+                  <Text style={[styles.label, { color: theme.text }]}>DUE DATE *</Text>
+                  <TextInput style={[styles.input, { borderColor: theme.border, color: theme.text, backgroundColor: theme.background }]} placeholder="yyyy-mm-dd" placeholderTextColor={theme.subText} value={dueDateText} onChangeText={setDueDateText} />
                 </View>
                 <View style={styles.halfWidth}>
-                  <Text style={styles.label}>TOTAL MARKS *</Text>
-                  <TextInput style={[styles.input, { borderColor: theme.border, color: theme.text }]} placeholder="100" placeholderTextColor={theme.subText} keyboardType="numeric" value={totalMarksText} onChangeText={setTotalMarksText} />
+                  <Text style={[styles.label, { color: theme.text }]}>TOTAL MARKS *</Text>
+                  <TextInput style={[styles.input, { borderColor: theme.border, color: theme.text, backgroundColor: theme.background }]} placeholder="100" placeholderTextColor={theme.subText} keyboardType="numeric" value={totalMarksText} onChangeText={setTotalMarksText} />
                 </View>
               </View>
 
-              <Text style={styles.label}>ASSIGNMENT FILES</Text>
-              <TouchableOpacity onPress={handlePickTeacherFiles} style={[styles.uploadBox, { borderColor: theme.primary }]}>
+              <Text style={[styles.label, { color: theme.text }]}>ASSIGNMENT FILES</Text>
+              <TouchableOpacity onPress={handlePickTeacherFiles} style={[styles.uploadBox, { borderColor: theme.primary, backgroundColor: isDark ? 'transparent' : 'rgba(0,0,0,0.01)' }]}>
                 <MaterialIcons name="cloud-upload" size={30} color={theme.primary} />
                 <Text style={{ color: theme.text, marginTop: 8, fontWeight: 'bold' }}>Upload assignment files</Text>
                 <Text style={{ color: theme.subText, fontSize: 11 }}>Click to select (up to 5 files)</Text>
               </TouchableOpacity>
               
+              {/* 🌟 Added: Display Already Existing Files when Editing */}
+              {existingAttachments.map((url, i) => (
+                <View key={`ext-${i}`} style={[styles.fileRow, { borderColor: theme.border }]}> 
+                  <TouchableOpacity style={{ flex: 1 }} onPress={() => Linking.openURL(url)}>
+                     <Text style={{ color: theme.primary, textDecorationLine: 'underline' }} numberOfLines={1}>Existing File {i + 1}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setExistingAttachments(existingAttachments.filter((_, idx)=>idx !== i))}><Text style={{color: '#EF4444'}}>X</Text></TouchableOpacity>
+                </View>
+              ))}
+
               {teacherFiles.map((f, i) => (
-                <View key={i} style={styles.fileRow}>
-                  <Text style={{flex: 1}} numberOfLines={1}>{f.name}</Text>
-                  <TouchableOpacity onPress={() => setTeacherFiles(teacherFiles.filter((_, idx)=>idx !== i))}><Text style={{color: 'red'}}>X</Text></TouchableOpacity>
+                <View key={i} style={[styles.fileRow, { borderColor: theme.border }]}> 
+                  <Text style={{ flex: 1, color: theme.text }} numberOfLines={1}>{f.name}</Text>
+                  <TouchableOpacity onPress={() => setTeacherFiles(teacherFiles.filter((_, idx)=>idx !== i))}><Text style={{color: '#EF4444'}}>X</Text></TouchableOpacity>
                 </View>
               ))}
 
@@ -431,15 +496,15 @@ const AssignmentScreen = ({ navigation }: { navigation: any }) => {
             </View>
             
             <ScrollView showsVerticalScrollIndicator={false}>
-              <View style={[styles.infoBanner, { backgroundColor: 'rgba(0,0,0,0.03)' }]}>
+              <View style={[styles.infoBanner, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)', borderColor: theme.border }]}>
                 <Text style={{ color: theme.subText, fontSize: 11, fontWeight: 'bold' }}>ASSIGNMENT</Text>
                 <Text style={{ color: theme.text, fontSize: 16, fontWeight: 'bold', marginVertical: 4 }}>{selectedAssignmentForSubmission?.title}</Text>
                 <Text style={{ color: theme.subText, fontSize: 12 }}>Due: {selectedAssignmentForSubmission?.dueDate.split('T')[0]} • {selectedAssignmentForSubmission?.totalMarks} marks</Text>
               </View>
 
-              <Text style={styles.label}>ANSWER / NOTES</Text>
+              <Text style={[styles.label, { color: theme.text }]}>ANSWER / NOTES</Text>
               <TextInput 
-                style={[styles.input, { height: 100, textAlignVertical: 'top', borderColor: theme.border, color: theme.text }]} 
+                style={[styles.input, { height: 100, textAlignVertical: 'top', borderColor: theme.border, color: theme.text, backgroundColor: theme.background }]} 
                 placeholder="Type your answer here..." 
                 placeholderTextColor={theme.subText} 
                 value={studentContent} 
@@ -447,17 +512,17 @@ const AssignmentScreen = ({ navigation }: { navigation: any }) => {
                 multiline 
               />
 
-              <Text style={styles.label}>UPLOAD SUBMISSION FILES *</Text>
-              <TouchableOpacity onPress={handlePickStudentFiles} style={[styles.uploadBox, { borderColor: theme.primary, borderStyle: 'dashed' }]}>
+              <Text style={[styles.label, { color: theme.text }]}>UPLOAD SUBMISSION FILES *</Text>
+              <TouchableOpacity onPress={handlePickStudentFiles} style={[styles.uploadBox, { borderColor: theme.primary, borderStyle: 'dashed', backgroundColor: isDark ? 'transparent' : 'rgba(0,0,0,0.01)' }]}>
                 <MaterialIcons name="file-upload" size={30} color={theme.primary} />
                 <Text style={{ color: theme.text, marginTop: 8, fontWeight: 'bold' }}>Upload your submission</Text>
                 <Text style={{ color: theme.subText, fontSize: 11 }}>Click to select (up to 10 files)</Text>
               </TouchableOpacity>
               
               {studentFiles.map((f, i) => (
-                <View key={i} style={styles.fileRow}>
-                  <Text style={{flex: 1}} numberOfLines={1}>{f.name}</Text>
-                  <TouchableOpacity onPress={() => setStudentFiles(studentFiles.filter((_, idx)=>idx !== i))}><Text style={{color: 'red'}}>X</Text></TouchableOpacity>
+                <View key={i} style={[styles.fileRow, { borderColor: theme.border }]}>
+                  <Text style={{ flex: 1, color: theme.text }} numberOfLines={1}>{f.name}</Text>
+                  <TouchableOpacity onPress={() => setStudentFiles(studentFiles.filter((_, idx)=>idx !== i))}><Text style={{color: '#EF4444'}}>X</Text></TouchableOpacity>
                 </View>
               ))}
 
@@ -481,7 +546,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 },
   mainTitle: { fontSize: 20, fontWeight: 'bold' },
   newBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
-  card: { padding: 16, borderRadius: 10, borderWidth: 1, marginBottom: 12 },
+  card: { padding: 16, borderRadius: 10, borderWidth: 1, marginBottom: 12, marginHorizontal: 16 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
   cardTitle: { fontSize: 16, fontWeight: 'bold', flex: 1, marginRight: 8 },
   badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
@@ -491,25 +556,34 @@ const styles = StyleSheet.create({
   infoText: { fontSize: 12, fontWeight: '500' },
   actionRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingTop: 8 },
   actionButton: { marginLeft: 10, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, alignItems: 'center' },
-  statusBanner: { flexDirection: 'row', justifyContent: 'space-between', borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: 'rgba(0,0,0,0.03)' },
+  statusBanner: { flexDirection: 'row', justifyContent: 'space-between', borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6 },
   submitTriggerBtn: { borderWidth: 1, borderRadius: 6, paddingVertical: 8, alignItems: 'center' },
   
   // Modal Styles
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 10 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    padding: 10
+  },
   modalContent: { padding: 20, borderRadius: 12, maxHeight: '95%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
   modalTitle: { fontSize: 18, fontWeight: 'bold' },
-  label: { fontSize: 11, fontWeight: 'bold', marginBottom: 4, color: '#555' },
+  label: { 
+    fontSize: 11, 
+    fontWeight: 'bold', 
+    marginBottom: 4,
+  },
   input: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, marginBottom: 12, height: 44 },
   row: { flexDirection: 'row', justifyContent: 'space-between' },
   halfWidth: { width: '48%' },
   pickerWrapper: { height: 44, borderWidth: 1, borderRadius: 8, justifyContent: 'center', overflow: 'hidden', marginBottom: 12 },
-  uploadBox: { borderWidth: 1, borderStyle: 'dashed', borderRadius: 8, padding: 20, alignItems: 'center', marginBottom: 12, backgroundColor: 'rgba(0,0,0,0.01)' },
-  fileRow: { flexDirection: 'row', justifyContent: 'space-between', padding: 8, borderWidth: 1, borderColor: '#EEE', borderRadius: 6, marginBottom: 6 },
+  uploadBox: { borderWidth: 1, borderStyle: 'dashed', borderRadius: 8, padding: 20, alignItems: 'center', marginBottom: 12 },
+  fileRow: { flexDirection: 'row', justifyContent: 'space-between', padding: 8, borderWidth: 1, borderRadius: 6, marginBottom: 6 },
   btnRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 15 },
   cancelBtn: { paddingVertical: 10, paddingHorizontal: 20, borderWidth: 1, borderRadius: 8, marginRight: 10 },
   saveBtn: { paddingVertical: 10, paddingHorizontal: 25, borderRadius: 8 },
-  infoBanner: { padding: 12, borderRadius: 8, marginBottom: 14, borderWidth: 1, borderColor: '#EEE' }
+  infoBanner: { padding: 12, borderRadius: 8, marginBottom: 14, borderWidth: 1 }
 });
 
 export default AssignmentScreen;

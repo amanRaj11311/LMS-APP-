@@ -46,7 +46,7 @@ const StudyMaterialScreen = () => {
   const [title, setTitle] = useState('');
   const [subjectId, setSubjectId] = useState('');
   const [selectedBatchIds, setSelectedBatchIds] = useState<string[]>([]);
-  const [type, setType] = useState('pdf');
+  const [type, setType] = useState('');
   const [fileUrl, setFileUrl] = useState('');
   const [description, setDescription] = useState('');
   const [isPublic, setIsPublic] = useState(false);
@@ -59,7 +59,7 @@ const StudyMaterialScreen = () => {
     setTitle('');
     setSubjectId('');
     setSelectedBatchIds([]);
-    setType('pdf');
+  setType('');
     setFileUrl('');
     setDescription('');
     setIsPublic(false);
@@ -310,33 +310,51 @@ const StudyMaterialScreen = () => {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.label}>TYPE *</Text>
                   <View style={[styles.pickerWrapper, { borderColor: theme.border }]}>
-                    <Picker
-                      selectedValue={type}
-                      onValueChange={(val) => {
-                          setType(val);
-                          setSelectedFile(null);
-                          setFileUrl('');
-                      }}>
-                      <Picker.Item label="PDF" value="pdf" />
-                      <Picker.Item label="Notes" value="notes" />
-                      <Picker.Item label="Video" value="video" />
-                      <Picker.Item label="Presentation" value="presentation" />
-                      <Picker.Item label="Link" value="link" />
-                      <Picker.Item label="Other" value="other" />
-                    </Picker>
-                  </View>
+  <Picker
+  mode="dropdown"
+    selectedValue={type}
+    dropdownIconColor={theme.text}
+    itemStyle={{ color: theme.text }}
+    style={{ color: theme.text, height: 50 }}
+    onValueChange={(val) => {
+      setType(val);
+      setSelectedFile(null);
+      setFileUrl('');
+    }}>
+    
+    <Picker.Item label="Select Type" value="" color="#999" />
+    <Picker.Item label="PDF" value="pdf" />
+    <Picker.Item label="Notes" value="notes" />
+    <Picker.Item label="Video" value="video" />
+    <Picker.Item label="Presentation" value="presentation" />
+    <Picker.Item label="Link" value="link" />
+    <Picker.Item label="Other" value="other" />
+  </Picker>
+</View>
                 </View>
 
                 <View style={{ flex: 1, marginLeft: 10 }}>
                   <Text style={styles.label}>SUBJECT *</Text>
-                  <View style={[styles.pickerWrapper, { borderColor: theme.border }]}>
-                    <Picker selectedValue={subjectId} onValueChange={setSubjectId}>
-                      <Picker.Item label="Select" value="" />
-                      {subjects.map((s: any) => (
-                        <Picker.Item key={s._id} label={s.name} value={s._id} />
-                      ))}
-                    </Picker>
-                  </View>
+                 <View style={[styles.pickerWrapper, { borderColor: theme.border }]}>
+  <Picker
+  mode="dropdown"
+    selectedValue={subjectId}
+    dropdownIconColor={theme.text}
+    itemStyle={{ color: theme.text }}
+    style={{ color: theme.text, height: 50 }}
+    onValueChange={setSubjectId}>
+    
+    <Picker.Item label="Select Subject" value="" color="#999" />
+
+    {subjects.map((s: any) => (
+      <Picker.Item
+        key={s._id}
+        label={s.name}
+        value={s._id}
+      />
+    ))}
+  </Picker>
+</View>
                 </View>
               </View>
 
@@ -432,7 +450,13 @@ const styles = StyleSheet.create({
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
   formTitle: { fontSize: 18, fontWeight: 'bold' },
   input: { borderWidth: 1, borderRadius: 8, padding: 12, marginBottom: 15 },
-  pickerWrapper: { borderWidth: 1, borderRadius: 8, marginBottom: 15, overflow: 'hidden' },
+ pickerWrapper: {
+  borderWidth: 1,
+  borderRadius: 8,
+  marginBottom: 15,
+  justifyContent: 'center',
+  overflow: Platform.OS === 'ios' ? 'hidden' : 'visible',
+},
   uploadBox: { height: 90, borderWidth: 1, borderStyle: 'dashed', justifyContent: 'center', alignItems: 'center', marginBottom: 15, borderRadius: 8, padding: 10 },
   fileRow: { flexDirection: 'row', alignItems: 'center', padding: 12, borderWidth: 1, borderRadius: 8, marginBottom: 10 },
   checkboxRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },

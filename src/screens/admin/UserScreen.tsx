@@ -188,25 +188,24 @@ const UserScreen = () => {
     // Mobile Validation
     const mobileRegex = /^[6-9]\d{9}$/;
 
-    if (!mobileRegex.test(cleanMobile)) {
-      Alert.alert(
-        'Invalid Mobile Number',
-        'Please enter valid 10 digit mobile number',
-      );
-      return false;
-    }
+if (!mobileRegex.test(cleanMobile)) {
+  Alert.alert(
+    'Invalid Mobile Number',
+    'Please enter valid 10 digit mobile number',
+  );
+  return false;
+}
 
     // Email Validation
-    const emailRegex =
-      /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,}$/;
+   const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,}$/;
 
-    if (!emailRegex.test(cleanEmail)) {
-      Alert.alert(
-        'Invalid Email',
-        'Please enter valid email address',
-      );
-      return false;
-    }
+if (!emailRegex.test(cleanEmail) || cleanEmail.includes('..')) { // 🌟 Ye check add karo
+  Alert.alert(
+    'Invalid Email',
+    'Please enter a valid email address (no consecutive dots allowed)',
+  );
+  return false;
+}
 
     // Name Validation
     const nameRegex = /^[A-Za-z ]+$/;
