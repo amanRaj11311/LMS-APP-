@@ -240,7 +240,7 @@ const CustomDrawerContent = (props: DrawerContentComponentProps) => {
             {renderDrawerItem('Tests', 'check-circle', 'Test')}
             {renderDrawerItem('Exams', 'description', 'Exam')}
             {renderDrawerItem('Timetable', 'view-timeline', 'Timetable')}
-            {renderDrawerItem('Attendance', 'event-available', 'Attendance')}
+            {/* {renderDrawerItem('Attendance', 'event-available', 'Attendance')} */}
           </>
         )}
 
@@ -299,7 +299,7 @@ export default function AppNavigator() {
               <Drawer.Screen name="StudyMaterial" component={StudyMaterialScreen} />
               <Drawer.Screen name="Timetable" component={TimetableScreen} />
               <Drawer.Screen name="Lesson" component={LessonScreen} />
-              <Drawer.Screen name="Attendance" component={AttendanceScreen} />
+              {/* <Drawer.Screen name="Attendance" component={AttendanceScreen} /> */}
               <Drawer.Screen name="Exam" component={ExamScreen} />
               <Drawer.Screen name="Test" component={(props) => <TestScreen {...props} />} />
               <Drawer.Screen name="Leave" component={LeaveScreen} />

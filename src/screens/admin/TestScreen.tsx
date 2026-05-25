@@ -8,7 +8,7 @@ import { Picker } from '@react-native-picker/picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
-import { pick } from '@react-native-documents/picker'; // 🌟 Added Document Picker
+import { pick } from '@react-native-documents/picker';
 import { useTheme } from '../../theme/ThemeContext';
 import { testApi } from '../../api/testApi'; 
 import { subjectApi } from '../../api/subjectApi';
@@ -32,7 +32,10 @@ const TestScreen = ({ navigation }: { navigation: any }) => {
   // Active Test (for student)
   const [activeTest, setActiveTest] = useState<any>(null);
 
-  // Form Metadata States (Shared for Create & Bulk)
+  // 🌟 Added: Editing State
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  // Form Metadata States
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [batchId, setBatchId] = useState('');
@@ -42,7 +45,7 @@ const TestScreen = ({ navigation }: { navigation: any }) => {
   // Questions State for Create Test
   const [questions, setQuestions] = useState<any[]>([]);
   
-  // 🌟 Added State for Bulk File
+  // Bulk File
   const [excelFile, setExcelFile] = useState<any>(null);
 
   const fetchData = async () => {
@@ -69,9 +72,10 @@ const TestScreen = ({ navigation }: { navigation: any }) => {
   useFocusEffect(useCallback(() => { fetchData(); }, []));
 
   const resetForm = () => {
+    setEditingId(null);
     setTitle(''); setDescription(''); setBatchId(''); setSubjectId(''); setDuration('');
     setQuestions([]);
-    setExcelFile(null); // 🌟 Reset file
+    setExcelFile(null); 
   };
 
   // --- QUESTION BUILDER LOGIC ---
@@ -114,22 +118,54 @@ const TestScreen = ({ navigation }: { navigation: any }) => {
     setQuestions(updated);
   };
 
+  // 🌟 FIX 2: EDIT & DELETE HANDLERS ADDED
+  const handleTriggerEdit = (item: any) => {
+    setEditingId(item._id);
+    setTitle(item.title);
+    setDescription(item.description || '');
+    setBatchId(item.batchId?._id || item.batchId || '');
+    setSubjectId(item.subjectId?._id || item.subjectId || '');
+    setDuration(item.duration ? item.duration.toString() : '');
+    setQuestions(item.questions || []);
+    setCreateModal(true);
+  };
+
+  const handleDelete = (id: string) => {
+    Alert.alert("Delete Test", "Are you sure you want to permanently delete this test?", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: async () => {
+          try {
+             await (testApi as any).delete(id); // Cast to any to avoid TS errors if not fully defined in your testApi yet
+             fetchData();
+          } catch (e: any) { Alert.alert("Error", "Could not delete test."); }
+        } 
+      }
+    ]);
+  };
+
   // --- SAVE HANDLERS ---
   const handleCreateTest = async () => {
     if(!title || !batchId || !subjectId) return Alert.alert("Required", "Title, Batch and Subject are required.");
     setIsSubmitting(true);
     try {
       const payload = { title, description, batchId, subjectId, duration: duration ? Number(duration) : null, questions };
-      await testApi.create(payload);
-      Alert.alert("Success", "Test created successfully!");
+      
+      // 🌟 Modified to support both Create and Update
+      if (editingId) {
+        await (testApi as any).update(editingId, payload); 
+        Alert.alert("Success", "Test updated successfully!");
+      } else {
+        await testApi.create(payload);
+        Alert.alert("Success", "Test created successfully!");
+      }
+      
       setCreateModal(false);
       resetForm();
       fetchData();
-    } catch (e: any) { Alert.alert("Error", e.response?.data?.message || "Failed to create test"); }
+    } catch (e: any) { Alert.alert("Error", e.response?.data?.message || "Failed to save test"); }
     finally { setIsSubmitting(false); }
   };
 
-  // 🌟 Document Picker Logic Added
   const pickExcelFile = async () => {
     try {
       const res = await pick({
@@ -138,12 +174,9 @@ const TestScreen = ({ navigation }: { navigation: any }) => {
       if (!res.canceled && res.assets && res.assets.length > 0) {
         setExcelFile(res.assets[0]);
       }
-    } catch (error) {
-      console.log("File picker error", error);
-    }
+    } catch (error) { console.log("File picker error", error); }
   };
 
-  // 🌟 Updated Bulk Upload to use FormData
   const handleBulkUpload = async () => {
     if(!title || !batchId || !subjectId) return Alert.alert("Required", "Title, Batch and Subject are required.");
     if(!excelFile) return Alert.alert("Required", "Please select an Excel file to upload.");
@@ -176,7 +209,7 @@ const TestScreen = ({ navigation }: { navigation: any }) => {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['bottom']}>
       {/* HEADER */}
       <View style={styles.header}>
         <Text style={[styles.listHeader, { color: theme.text }]}>Tests</Text>
@@ -193,24 +226,27 @@ const TestScreen = ({ navigation }: { navigation: any }) => {
         )}
       </View>
 
-      {/* TEST LIST */}
+      {/* 🌟 FIX 3: PROFESSIONAL CARD UI FOR TESTS */}
       <FlatList 
         data={tests}
         keyExtractor={(item) => item._id}
-        refreshControl={<RefreshControl refreshing={isLoading} onRefresh={fetchData} />}
+        refreshControl={<RefreshControl refreshing={isLoading} onRefresh={fetchData} colors={[theme.primary]} />}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20 }}
         renderItem={({ item }) => (
-          <View style={[styles.card, { backgroundColor: theme.surface }]}>
-            <View style={{flexDirection: 'row', justifyContent: 'space-between'}}>
-                <Text style={{ fontWeight: 'bold', fontSize: 16, color: theme.text }}>{item.title}</Text>
+          <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            
+            <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
+                <Text style={{ fontWeight: 'bold', fontSize: 16, color: theme.text, flex: 1 }} numberOfLines={1}>{item.title}</Text>
                 <View style={[styles.badge, {backgroundColor: 'rgba(16, 185, 129, 0.1)'}]}>
                     <Text style={{color: '#10B981', fontSize: 10, fontWeight: 'bold'}}>ACTIVE</Text>
                 </View>
             </View>
-            <View style={{flexDirection: 'row', marginTop: 10}}>
-                <Text style={styles.metaText}><MaterialIcons name="book" size={12}/> {item.subjectId?.name || 'N/A'}</Text>
-                <Text style={styles.metaText}><MaterialIcons name="group" size={12}/> {item.batchId?.name || 'N/A'}</Text>
-                <Text style={styles.metaText}><MaterialIcons name="schedule" size={12}/> {item.duration ? `${item.duration} min` : 'Unlim.'}</Text>
-                <Text style={styles.metaText}><MaterialIcons name="help-outline" size={12}/> {item.questions?.length || 0} Qs</Text>
+
+            <View style={{flexDirection: 'row', flexWrap: 'wrap', marginTop: 12, rowGap: 8}}>
+                <View style={styles.metaBadge}><MaterialIcons name="book" size={14} color={theme.subText}/><Text style={[styles.metaText, {color: theme.subText}]}>{item.subjectId?.name || 'N/A'}</Text></View>
+                <View style={styles.metaBadge}><MaterialIcons name="group" size={14} color={theme.subText}/><Text style={[styles.metaText, {color: theme.subText}]}>{item.batchId?.name || 'N/A'}</Text></View>
+                <View style={styles.metaBadge}><MaterialIcons name="schedule" size={14} color={theme.subText}/><Text style={[styles.metaText, {color: theme.subText}]}>{item.duration ? `${item.duration} min` : 'Unlim.'}</Text></View>
+                <View style={styles.metaBadge}><MaterialIcons name="help-outline" size={14} color={theme.subText}/><Text style={[styles.metaText, {color: theme.subText}]}>{item.questions?.length || 0} Qs</Text></View>
             </View>
 
             {role === 'student' ? (
@@ -219,16 +255,23 @@ const TestScreen = ({ navigation }: { navigation: any }) => {
                   <Text style={{color: '#FFF', fontWeight: 'bold'}}>View & Start</Text>
               </TouchableOpacity>
             ) : (
-               <View style={{flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10, borderTopWidth: 1, borderTopColor: '#EEE', paddingTop: 10}}>
-                   <TouchableOpacity><MaterialIcons name="edit" size={20} color={theme.subText} style={{marginRight: 15}}/></TouchableOpacity>
-                   <TouchableOpacity><MaterialIcons name="delete" size={20} color="#EF4444"/></TouchableOpacity>
+               <View style={styles.actionRow}>
+                   <TouchableOpacity style={styles.actionBtn} onPress={() => handleTriggerEdit(item)}>
+                     <MaterialIcons name="edit" size={18} color={theme.primary} />
+                     <Text style={[styles.actionText, {color: theme.primary}]}>Edit</Text>
+                   </TouchableOpacity>
+                   <TouchableOpacity style={styles.actionBtn} onPress={() => handleDelete(item._id)}>
+                     <MaterialIcons name="delete-outline" size={18} color="#EF4444" />
+                     <Text style={[styles.actionText, {color: '#EF4444'}]}>Delete</Text>
+                   </TouchableOpacity>
                </View>
             )}
           </View>
         )}
+        ListEmptyComponent={<Text style={{textAlign: 'center', marginTop: 40, color: theme.subText}}>No tests available.</Text>}
       />
 
-      {/* 1. STUDENT INSTRUCTIONS MODAL (View & Start Workflow) */}
+      {/* STUDENT INSTRUCTIONS MODAL (Unchanged) */}
       <Modal visible={studentInstructionsModal} animationType="fade" transparent={true}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
@@ -236,14 +279,12 @@ const TestScreen = ({ navigation }: { navigation: any }) => {
                 <Text style={styles.formTitle}>{activeTest?.title}</Text>
                 <TouchableOpacity onPress={() => setStudentInstructionsModal(false)}><MaterialIcons name="close" size={24}/></TouchableOpacity>
             </View>
-            
             <View style={styles.testMetaGrid}>
                <View style={styles.metaBox}><Text style={styles.metaLabel}>BATCH</Text><Text style={styles.metaVal}>{activeTest?.batchId?.name}</Text></View>
                <View style={styles.metaBox}><Text style={styles.metaLabel}>SUBJECT</Text><Text style={styles.metaVal}>{activeTest?.subjectId?.name}</Text></View>
                <View style={styles.metaBox}><Text style={styles.metaLabel}>DURATION</Text><Text style={styles.metaVal}>{activeTest?.duration ? `${activeTest.duration} min` : 'Unlimited'}</Text></View>
                <View style={styles.metaBox}><Text style={styles.metaLabel}>QUESTIONS</Text><Text style={styles.metaVal}>{activeTest?.questions?.length || 0}</Text></View>
             </View>
-
             <View style={styles.instructionsBox}>
                <Text style={{fontWeight: 'bold', color: theme.text, marginBottom: 8}}>Instructions</Text>
                <Text style={styles.bulletText}>• Answer all questions before submitting.</Text>
@@ -252,12 +293,10 @@ const TestScreen = ({ navigation }: { navigation: any }) => {
                <Text style={styles.bulletText}>• Test will auto-submit when time runs out.</Text>
                {activeTest?.description ? <Text style={[styles.bulletText, {marginTop: 5}]}>Extra: {activeTest.description}</Text> : null}
             </View>
-
             <View style={[styles.btnRow, {justifyContent: 'space-between'}]}>
               <TouchableOpacity style={[styles.cancelBtn, {flex: 0.4}]} onPress={() => setStudentInstructionsModal(false)}><Text>Cancel</Text></TouchableOpacity>
               <TouchableOpacity style={[styles.saveBtn, {flex: 0.55, backgroundColor: '#4338CA'}]} onPress={() => {
                 setStudentInstructionsModal(false); 
-                // 🌟 Navigates to the new TakeTestScreen
                 navigation.navigate('TakeTestScreen', { testData: activeTest }); 
               }}>
                  <Text style={{color:'#FFF', fontWeight: 'bold'}}>Start Test →</Text>
@@ -267,28 +306,53 @@ const TestScreen = ({ navigation }: { navigation: any }) => {
         </View>
       </Modal>
 
-      {/* 2. CREATE NEW TEST MODAL (Admin/Teacher) */}
+      {/* CREATE NEW TEST MODAL */}
       <Modal visible={createModal} animationType="slide" transparent={true}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: theme.surface, maxHeight: '95%', width: '95%' }]}>
             <View style={styles.modalHeaderRow}>
-                <Text style={styles.formTitle}>Create New Test</Text>
+                <Text style={styles.formTitle}>{editingId ? 'Edit Test' : 'Create New Test'}</Text>
                 <TouchableOpacity onPress={() => setCreateModal(false)}><MaterialIcons name="close" size={24}/></TouchableOpacity>
             </View>
             <ScrollView showsVerticalScrollIndicator={false}>
               
               <View style={styles.row}>
-                <View style={styles.half}><Text style={styles.label}>TITLE *</Text><TextInput style={styles.input} value={title} onChangeText={setTitle} placeholder="Chapter 3 Quiz" /></View>
-                <View style={styles.half}><Text style={styles.label}>BATCH *</Text><View style={styles.pickerWrapper}><Picker selectedValue={batchId} onValueChange={setBatchId}><Picker.Item label="Select batch" value=""/>{batches.map(b => <Picker.Item key={b._id} label={b.name} value={b._id}/>)}</Picker></View></View>
+                <View style={styles.half}>
+                  <Text style={styles.label}>TITLE *</Text>
+                  {/* 🌟 FIX 1: ADDED placeholderTextColor */}
+                  <TextInput style={styles.input} value={title} onChangeText={setTitle} placeholder="Chapter 3 Quiz" placeholderTextColor="#9CA3AF" />
+                </View>
+                <View style={styles.half}>
+                  <Text style={styles.label}>BATCH *</Text>
+                  <View style={styles.pickerWrapper}>
+                    <Picker selectedValue={batchId} onValueChange={setBatchId}>
+                      <Picker.Item label="Select batch" value="" color="#9CA3AF"/>
+                      {batches.map(b => <Picker.Item key={b._id} label={b.name} value={b._id}/>)}
+                    </Picker>
+                  </View>
+                </View>
               </View>
               
               <View style={styles.row}>
-                <View style={styles.half}><Text style={styles.label}>SUBJECT *</Text><View style={styles.pickerWrapper}><Picker selectedValue={subjectId} onValueChange={setSubjectId}><Picker.Item label="Select subject" value=""/>{subjects.map(s => <Picker.Item key={s._id} label={s.name} value={s._id}/>)}</Picker></View></View>
-                <View style={styles.half}><Text style={styles.label}>DURATION (MINUTES)</Text><TextInput style={styles.input} value={duration} onChangeText={setDuration} keyboardType="numeric" placeholder="e.g. 30" /></View>
+                <View style={styles.half}>
+                  <Text style={styles.label}>SUBJECT *</Text>
+                  <View style={styles.pickerWrapper}>
+                    <Picker selectedValue={subjectId} onValueChange={setSubjectId}>
+                      <Picker.Item label="Select subject" value="" color="#9CA3AF"/>
+                      {subjects.map(s => <Picker.Item key={s._id} label={s.name} value={s._id}/>)}
+                    </Picker>
+                  </View>
+                </View>
+                <View style={styles.half}>
+                  <Text style={styles.label}>DURATION (MINS)</Text>
+                  {/* 🌟 FIX 1: ADDED placeholderTextColor */}
+                  <TextInput style={styles.input} value={duration} onChangeText={setDuration} keyboardType="numeric" placeholder="e.g. 30" placeholderTextColor="#9CA3AF" />
+                </View>
               </View>
 
               <Text style={styles.label}>DESCRIPTION</Text>
-              <TextInput style={[styles.input, {height: 60, textAlignVertical: 'top'}]} value={description} onChangeText={setDescription} placeholder="Optional instructions for students..." multiline />
+              {/* 🌟 FIX 1: ADDED placeholderTextColor */}
+              <TextInput style={[styles.input, {height: 60, textAlignVertical: 'top'}]} value={description} onChangeText={setDescription} placeholder="Optional instructions for students..." placeholderTextColor="#9CA3AF" multiline />
 
               <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, marginBottom: 10}}>
                   <Text style={{fontWeight: 'bold', fontSize: 12, color: theme.subText}}>QUESTIONS ({questions.length})</Text>
@@ -306,12 +370,19 @@ const TestScreen = ({ navigation }: { navigation: any }) => {
                     <View key={i} style={styles.qBox}>
                       <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10}}>
                          <View style={styles.qNumberBadge}><Text style={{color: '#2563EB', fontWeight:'bold'}}>{i+1}</Text></View>
-                         <View style={[styles.pickerWrapper, {flex: 1, height: 40, marginHorizontal: 10}]}><Picker selectedValue={q.questionType} onValueChange={(v) => updateQuestion(i, 'questionType', v)}><Picker.Item label="Multiple Choice (MCQ)" value="MCQ"/><Picker.Item label="Fill in the blanks" value="Fill in the blanks"/><Picker.Item label="Short answer" value="Short answer"/></Picker></View>
+                         <View style={[styles.pickerWrapper, {flex: 1, height: 40, marginHorizontal: 10}]}>
+                           <Picker selectedValue={q.questionType} onValueChange={(v) => updateQuestion(i, 'questionType', v)}>
+                             <Picker.Item label="Multiple Choice (MCQ)" value="MCQ"/>
+                             <Picker.Item label="Fill in the blanks" value="Fill in the blanks"/>
+                             <Picker.Item label="Short answer" value="Short answer"/>
+                           </Picker>
+                         </View>
                          <TouchableOpacity onPress={() => removeQuestion(i)}><MaterialIcons name="close" size={20} color="#666" style={{marginTop: 10}}/></TouchableOpacity>
                       </View>
 
                       <Text style={styles.label}>QUESTION *</Text>
-                      <TextInput style={[styles.input, {height: 60}]} placeholder="Enter your question here..." value={q.questionText} onChangeText={(v) => updateQuestion(i, 'questionText', v)} multiline/>
+                      {/* 🌟 FIX 1: ADDED placeholderTextColor */}
+                      <TextInput style={[styles.input, {height: 60}]} placeholder="Enter your question here..." placeholderTextColor="#9CA3AF" value={q.questionText} onChangeText={(v) => updateQuestion(i, 'questionText', v)} multiline/>
                       
                       {q.questionType === 'MCQ' && (
                         <>
@@ -338,7 +409,7 @@ const TestScreen = ({ navigation }: { navigation: any }) => {
               <View style={styles.btnRow}>
                 <TouchableOpacity style={styles.cancelBtn} onPress={() => setCreateModal(false)}><Text style={{fontWeight: 'bold'}}>Cancel</Text></TouchableOpacity>
                 <TouchableOpacity style={styles.saveBtn} onPress={handleCreateTest} disabled={isSubmitting}>
-                    {isSubmitting ? <ActivityIndicator color="#FFF"/> : <Text style={{color:'#FFF', fontWeight: 'bold'}}>Create Test</Text>}
+                    {isSubmitting ? <ActivityIndicator color="#FFF"/> : <Text style={{color:'#FFF', fontWeight: 'bold'}}>{editingId ? 'Update Test' : 'Create Test'}</Text>}
                 </TouchableOpacity>
               </View>
             </ScrollView>
@@ -346,7 +417,7 @@ const TestScreen = ({ navigation }: { navigation: any }) => {
         </View>
       </Modal>
 
-      {/* 3. BULK UPLOAD MODAL (Admin/Teacher) */}
+      {/* BULK UPLOAD MODAL (Unchanged but placeholders fixed) */}
       <Modal visible={bulkModal} animationType="slide" transparent={true}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: theme.surface, maxHeight: '95%', width: '95%' }]}>
@@ -357,16 +428,16 @@ const TestScreen = ({ navigation }: { navigation: any }) => {
             <ScrollView showsVerticalScrollIndicator={false}>
               
               <Text style={styles.label}>TITLE *</Text>
-              <TextInput style={styles.input} value={title} onChangeText={setTitle} placeholder="e.g. Chapter 5 Quiz" />
+              <TextInput style={styles.input} value={title} onChangeText={setTitle} placeholder="e.g. Chapter 5 Quiz" placeholderTextColor="#9CA3AF" />
               
               <View style={styles.row}>
-                <View style={styles.half}><Text style={styles.label}>BATCH *</Text><View style={styles.pickerWrapper}><Picker selectedValue={batchId} onValueChange={setBatchId}><Picker.Item label="Select batch" value=""/>{batches.map(b => <Picker.Item key={b._id} label={b.name} value={b._id}/>)}</Picker></View></View>
-                <View style={styles.half}><Text style={styles.label}>SUBJECT *</Text><View style={styles.pickerWrapper}><Picker selectedValue={subjectId} onValueChange={setSubjectId}><Picker.Item label="Select batch first" value=""/>{subjects.map(s => <Picker.Item key={s._id} label={s.name} value={s._id}/>)}</Picker></View></View>
+                <View style={styles.half}><Text style={styles.label}>BATCH *</Text><View style={styles.pickerWrapper}><Picker selectedValue={batchId} onValueChange={setBatchId}><Picker.Item label="Select batch" value="" color="#9CA3AF"/>{batches.map(b => <Picker.Item key={b._id} label={b.name} value={b._id}/>)}</Picker></View></View>
+                <View style={styles.half}><Text style={styles.label}>SUBJECT *</Text><View style={styles.pickerWrapper}><Picker selectedValue={subjectId} onValueChange={setSubjectId}><Picker.Item label="Select subject" value="" color="#9CA3AF"/>{subjects.map(s => <Picker.Item key={s._id} label={s.name} value={s._id}/>)}</Picker></View></View>
               </View>
 
               <View style={styles.row}>
-                <View style={styles.half}><Text style={styles.label}>DURATION (MINUTES)</Text><TextInput style={styles.input} value={duration} onChangeText={setDuration} keyboardType="numeric" placeholder="e.g. 30" /></View>
-                <View style={styles.half}><Text style={styles.label}>DESCRIPTION</Text><TextInput style={styles.input} value={description} onChangeText={setDescription} placeholder="Optional" /></View>
+                <View style={styles.half}><Text style={styles.label}>DURATION (MINS)</Text><TextInput style={styles.input} value={duration} onChangeText={setDuration} keyboardType="numeric" placeholder="e.g. 30" placeholderTextColor="#9CA3AF" /></View>
+                <View style={styles.half}><Text style={styles.label}>DESCRIPTION</Text><TextInput style={styles.input} value={description} onChangeText={setDescription} placeholder="Optional" placeholderTextColor="#9CA3AF" /></View>
               </View>
 
               <Text style={[styles.label, {marginTop: 5}]}>Excel File *</Text>
@@ -382,7 +453,6 @@ const TestScreen = ({ navigation }: { navigation: any }) => {
                   <View style={{flexDirection: 'row'}}><Text style={[styles.guideText, {flex: 1.5, color: '#2563EB'}]}>Fill in blanks</Text><Text style={[styles.guideText, {flex: 1.5, color: '#2563EB'}]}>The ___ is...</Text><Text style={[styles.guideText, {flex: 2, color: '#2563EB'}]}>---</Text><Text style={[styles.guideText, {flex: 1, color: '#2563EB'}]}>Answer</Text></View>
               </View>
 
-              {/* 🌟 Updated File Picker Button */}
               <TouchableOpacity style={styles.uploadBox} onPress={pickExcelFile}>
                  <MaterialIcons name="upload-file" size={30} color={excelFile ? "#10B981" : "#9ca3af"} />
                  <Text style={{color: excelFile ? '#10B981' : '#6b7280', marginTop: 8, fontWeight: excelFile ? 'bold' : 'normal'}}>
@@ -412,16 +482,22 @@ const styles = StyleSheet.create({
   listHeader: { fontSize: 20, fontWeight: 'bold' },
   bulkBtnTop: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6, marginRight: 10, borderWidth: 1, borderColor: '#E5E7EB' },
   newBtnTop: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6 },
-  card: { padding: 16, marginHorizontal: 16, marginBottom: 12, borderRadius: 10, borderWidth: 1, borderColor: '#E5E7EB' },
-  badge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  metaText: { fontSize: 11, color: '#6B7280', marginRight: 12 },
-  viewStartBtn: { marginTop: 12, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingVertical: 10, borderRadius: 6 },
+  
+  // 🌟 FIX 3: PROFESSIONAL CARD STYLES
+  card: { padding: 16, marginBottom: 14, borderRadius: 12, borderWidth: 1, elevation: 2, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+  badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  metaBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, marginRight: 8 },
+  metaText: { fontSize: 12, marginLeft: 4, fontWeight: '500' },
+  viewStartBtn: { marginTop: 14, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingVertical: 12, borderRadius: 8 },
+  actionRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 14, borderTopWidth: 1, borderTopColor: '#F3F4F6', paddingTop: 12 },
+  actionBtn: { flexDirection: 'row', alignItems: 'center', marginLeft: 20, paddingVertical: 4 },
+  actionText: { fontSize: 13, fontWeight: 'bold', marginLeft: 4 },
   
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   modalContent: { padding: 20, borderRadius: 12, width: '90%' },
   modalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15, alignItems: 'center' },
   formTitle: { fontSize: 18, fontWeight: 'bold' },
-  input: { borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, paddingHorizontal: 12, height: 44, marginBottom: 15, backgroundColor: '#FFF' },
+  input: { borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, paddingHorizontal: 12, height: 44, marginBottom: 15, backgroundColor: '#FFF', color: '#111827' },
   pickerWrapper: { borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, marginBottom: 15, overflow: 'hidden', height: 44, justifyContent: 'center', backgroundColor: '#FFF' },
   label: { fontSize: 11, fontWeight: 'bold', color: '#4B5563', marginBottom: 6, textTransform: 'uppercase' },
   row: { flexDirection: 'row', justifyContent: 'space-between' },
