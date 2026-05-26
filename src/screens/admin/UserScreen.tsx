@@ -12,13 +12,16 @@ import {
   Modal,
   RefreshControl,
   ScrollView,
+  Platform, // Needed for Picker styling if needed
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Picker } from '@react-native-picker/picker'; // Added Picker
 import { useTheme } from '../../theme/ThemeContext';
-import { userApi, UserAccount, CreateUserPayload } from '../../api/userApi';
+import { userApi, UserAccount } from '../../api/userApi';
+import { enrollmentApi } from '../../api/enrollmentApi';
 
 const UserScreen = () => {
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
 
   const [users, setUsers] = useState<UserAccount[]>([]);
   const [filteredUsers, setFilteredUsers] = useState<UserAccount[]>([]);
@@ -42,17 +45,32 @@ const UserScreen = () => {
   // Search & Filter
   const [searchText, setSearchText] = useState('');
   const [selectedRole, setSelectedRole] = useState('all');
+  const [enrollments, setEnrollments] = useState<any[]>([]);
+  const [selectedBatch, setSelectedBatch] = useState('all');
 
   useEffect(() => {
-    fetchUsersList();
+    fetchInitialData();
   }, []);
 
   useEffect(() => {
     applyFilters();
-  }, [users, searchText, selectedRole]);
+  }, [users, enrollments, searchText, selectedRole, selectedBatch]);
 
-  const fetchUsersList = async () => {
+  const fetchInitialData = async () => {
     setIsLoading(true);
+
+    try {
+      await Promise.all([
+        fetchUsersList(false),
+        fetchEnrollmentsList(),
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const fetchUsersList = async (showLoader = true) => {
+    if (showLoader) setIsLoading(true);
 
     try {
       const response = await userApi.getAll();
@@ -66,7 +84,18 @@ const UserScreen = () => {
         error?.response?.data?.error || 'Failed to fetch users',
       );
     } finally {
-      setIsLoading(false);
+      if (showLoader) setIsLoading(false);
+    }
+  };
+  const fetchEnrollmentsList = async () => {
+    try {
+      const response = await enrollmentApi.getAll();
+
+      if (response?.success) {
+        setEnrollments(response.data || []);
+      }
+    } catch (error: any) {
+      console.log('ENROLLMENT FETCH ERROR => ', error);
     }
   };
 
@@ -74,11 +103,10 @@ const UserScreen = () => {
     setIsRefreshing(true);
 
     try {
-      const response = await userApi.getAll();
-
-      if (response?.success) {
-        setUsers(response.data || []);
-      }
+      await Promise.all([
+        fetchUsersList(false),
+        fetchEnrollmentsList(),
+      ]);
     } catch (error: any) {
       Alert.alert(
         'Error',
@@ -92,30 +120,54 @@ const UserScreen = () => {
   const applyFilters = () => {
     let temp = [...users];
 
-    // Search
+    // Search Filter
     if (searchText.trim()) {
       const text = searchText.toLowerCase();
 
       temp = temp.filter(user => {
-  const fullName = `${user.firstName || ''} ${user.middleName || ''} ${user.lastName || ''}`.toLowerCase();
+        const fullName = `${user.firstName || ''} ${user.middleName || ''} ${user.lastName || ''}`.toLowerCase();
+        const email = (user.email || '').toLowerCase();
+        const mobile = (user.mobileNumber || '').toString();
 
-  const email = (user.email || '').toLowerCase();
-
-  const mobile = (user.mobileNumber || '').toString();
-
-  return (
-    fullName.includes(text) ||
-    email.includes(text) ||
-    mobile.includes(text)
-  );
-});
+        return (
+          fullName.includes(text) ||
+          email.includes(text) ||
+          mobile.includes(text)
+        );
+      });
     }
 
     // Role Filter
     if (selectedRole !== 'all') {
       temp = temp.filter(
-  user => (user.role || '').toLowerCase() === selectedRole.toLowerCase(),
-);
+        user => (user.role || '').toLowerCase() === selectedRole.toLowerCase(),
+      );
+    }
+
+    // Batch Filter from /api/enrollments
+    if (selectedBatch !== 'all') {
+      temp = temp.filter(user => {
+        const userId = user._id;
+
+        return enrollments.some(enrollment => {
+          const batchId = enrollment.batchId?._id;
+
+          if (batchId !== selectedBatch) return false;
+
+          // Student batch filter
+          if ((user.role || '').toLowerCase() === 'student') {
+            return enrollment.studentId?._id === userId;
+          }
+
+          // Teacher batch filter
+          // This works only if your enrollment API has teacherId
+          if ((user.role || '').toLowerCase() === 'teacher') {
+            return enrollment.teacherId?._id === userId;
+          }
+
+          return false;
+        });
+      });
     }
 
     setFilteredUsers(temp);
@@ -188,24 +240,24 @@ const UserScreen = () => {
     // Mobile Validation
     const mobileRegex = /^[6-9]\d{9}$/;
 
-if (!mobileRegex.test(cleanMobile)) {
-  Alert.alert(
-    'Invalid Mobile Number',
-    'Please enter valid 10 digit mobile number',
-  );
-  return false;
-}
+    if (!mobileRegex.test(cleanMobile)) {
+      Alert.alert(
+        'Invalid Mobile Number',
+        'Please enter valid 10 digit mobile number',
+      );
+      return false;
+    }
 
     // Email Validation
-   const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,}$/;
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,}$/;
 
-if (!emailRegex.test(cleanEmail) || cleanEmail.includes('..')) { // 🌟 Ye check add karo
-  Alert.alert(
-    'Invalid Email',
-    'Please enter a valid email address (no consecutive dots allowed)',
-  );
-  return false;
-}
+    if (!emailRegex.test(cleanEmail) || cleanEmail.includes('..')) { 
+      Alert.alert(
+        'Invalid Email',
+        'Please enter a valid email address (no consecutive dots allowed)',
+      );
+      return false;
+    }
 
     // Name Validation
     const nameRegex = /^[A-Za-z ]+$/;
@@ -345,6 +397,23 @@ if (!emailRegex.test(cleanEmail) || cleanEmail.includes('..')) { // 🌟 Ye chec
     [users],
   );
 
+  const batchOptions = useMemo(() => {
+    const map = new Map();
+
+    enrollments.forEach(enrollment => {
+      const batch = enrollment.batchId;
+
+      if (batch?._id && batch?.name) {
+        map.set(batch._id, batch.name);
+      }
+    });
+
+    return Array.from(map.entries()).map(([id, name]) => ({
+      id,
+      name,
+    }));
+  }, [enrollments]);
+
   const renderUserCard = ({ item }: { item: UserAccount }) => {
     const fullName = `${item.firstName} ${
       item.middleName ? item.middleName + ' ' : ''
@@ -441,33 +510,31 @@ if (!emailRegex.test(cleanEmail) || cleanEmail.includes('..')) { // 🌟 Ye chec
       </View>
 
       {/* KPI CARDS */}
-      {/* KPI CARDS */}
-<View style={styles.kpiWrapper}>
-  
-  <View style={[styles.kpiCard, { backgroundColor: '#2563EB' }]}>
-    <Text style={styles.kpiValue}>{totalUsers}</Text>
-    <Text style={styles.kpiTitle}>Total Users</Text>
-  </View>
+      <View style={styles.kpiWrapper}>
+        <View style={[styles.kpiCard, { backgroundColor: '#2563EB' }]}>
+          <Text style={styles.kpiValue}>{totalUsers}</Text>
+          <Text style={styles.kpiTitle}>Total Users</Text>
+        </View>
 
-  <View style={[styles.kpiCard, { backgroundColor: '#16A34A' }]}>
-    <Text style={styles.kpiValue}>{totalStudents}</Text>
-    <Text style={styles.kpiTitle}>Students</Text>
-  </View>
+        <View style={[styles.kpiCard, { backgroundColor: '#16A34A' }]}>
+          <Text style={styles.kpiValue}>{totalStudents}</Text>
+          <Text style={styles.kpiTitle}>Students</Text>
+        </View>
 
-  <View style={[styles.kpiCard, { backgroundColor: '#0891B2' }]}>
-    <Text style={styles.kpiValue}>{totalTeachers}</Text>
-    <Text style={styles.kpiTitle}>Teachers</Text>
-  </View>
+        <View style={[styles.kpiCard, { backgroundColor: '#0891B2' }]}>
+          <Text style={styles.kpiValue}>{totalTeachers}</Text>
+          <Text style={styles.kpiTitle}>Teachers</Text>
+        </View>
 
-  <View style={[styles.kpiCard, { backgroundColor: '#DC2626' }]}>
-    <Text style={styles.kpiValue}>{totalAdmins}</Text>
-    <Text style={styles.kpiTitle}>Admins</Text>
-  </View>
+        <View style={[styles.kpiCard, { backgroundColor: '#DC2626' }]}>
+          <Text style={styles.kpiValue}>{totalAdmins}</Text>
+          <Text style={styles.kpiTitle}>Admins</Text>
+        </View>
+      </View>
 
-</View>
-
-      {/* SEARCH & FILTER */}
+      {/* SEARCH & FILTER (Modern UI) */}
       <View style={styles.filterContainer}>
+        {/* Search Bar */}
         <TextInput
           placeholder="Search name, email, mobile..."
           placeholderTextColor={theme.subText}
@@ -483,37 +550,40 @@ if (!emailRegex.test(cleanEmail) || cleanEmail.includes('..')) { // 🌟 Ye chec
           ]}
         />
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}>
-          {['all', 'student', 'teacher', 'admin'].map(item => (
-            <TouchableOpacity
-              key={item}
-              onPress={() => setSelectedRole(item)}
-              style={[
-                styles.filterBtn,
-                {
-                  backgroundColor:
-                    selectedRole === item
-                      ? theme.primary
-                      : theme.surface,
-                  borderColor: theme.border,
-                },
-              ]}>
-              <Text
-                style={{
-                  color:
-                    selectedRole === item
-                      ? '#FFF'
-                      : theme.text,
-                  fontWeight: '600',
-                  textTransform: 'capitalize',
-                }}>
-                {item}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        {/* Dropdown Filters (Role & Batch) */}
+        <View style={styles.filterRow}>
+          {/* Role Dropdown */}
+          <View style={[styles.pickerContainer, { borderColor: theme.border, backgroundColor: theme.surface }]}>
+            <Picker
+              selectedValue={selectedRole}
+              onValueChange={(itemValue) => setSelectedRole(itemValue)}
+              style={{ color: theme.text }}
+              dropdownIconColor={theme.text}
+              mode="dropdown"
+            >
+              <Picker.Item label="All Roles" value="all" color={isDark ? '#FFF' : '#000'} />
+              <Picker.Item label="Student" value="student" color={isDark ? '#FFF' : '#000'} />
+              <Picker.Item label="Teacher" value="teacher" color={isDark ? '#FFF' : '#000'} />
+              <Picker.Item label="Admin" value="admin" color={isDark ? '#FFF' : '#000'} />
+            </Picker>
+          </View>
+
+          {/* Batch Dropdown */}
+          <View style={[styles.pickerContainer, { borderColor: theme.border, backgroundColor: theme.surface }]}>
+            <Picker
+              selectedValue={selectedBatch}
+              onValueChange={(itemValue) => setSelectedBatch(itemValue)}
+              style={{ color: theme.text }}
+              dropdownIconColor={theme.text}
+              mode="dropdown"
+            >
+              <Picker.Item label="All Batches" value="all" color={isDark ? '#FFF' : '#000'} />
+              {batchOptions.map((batch) => (
+                <Picker.Item key={batch.id} label={batch.name} value={batch.id} color={isDark ? '#FFF' : '#000'} />
+              ))}
+            </Picker>
+          </View>
+        </View>
       </View>
 
       {/* MODAL */}
@@ -784,56 +854,40 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
 
- 
+  kpiWrapper: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    marginTop: 14,
+  },
 
   kpiCard: {
-    width: 130,
-    paddingVertical: 18,
-    borderRadius: 16,
-    marginRight: 12,
-    alignItems: 'center',
+    width: '48%',
+    borderRadius: 18,
+    paddingVertical: 22,
+    paddingHorizontal: 16,
+    marginBottom: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 5,
+    elevation: 5,
+    alignItems: 'center', // Centered KPI texts as per previous style
   },
 
- 
-
-  kpiWrapper: {
-  flexDirection: 'row',
-  flexWrap: 'wrap',
-  justifyContent: 'space-between',
-  paddingHorizontal: 16,
-  marginTop: 14,
-},
-
-kpiCard: {
-  width: '48%',
-  borderRadius: 18,
-  paddingVertical: 22,
-  paddingHorizontal: 16,
-  marginBottom: 14,
-
-  shadowColor: '#000',
-  shadowOffset: {
-    width: 0,
-    height: 3,
+  kpiValue: {
+    color: '#FFF',
+    fontSize: 30,
+    fontWeight: 'bold',
   },
-  shadowOpacity: 0.15,
-  shadowRadius: 5,
 
-  elevation: 5,
-},
-
-kpiValue: {
-  color: '#FFF',
-  fontSize: 30,
-  fontWeight: 'bold',
-},
-
-kpiTitle: {
-  color: '#FFF',
-  fontSize: 14,
-  fontWeight: '600',
-  marginTop: 6,
-},
+  kpiTitle: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 6,
+  },
 
   filterContainer: {
     paddingHorizontal: 16,
@@ -849,14 +903,19 @@ kpiTitle: {
     fontSize: 15,
   },
 
-  filterBtn: {
-    paddingHorizontal: 16,
-    height: 40,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 10,
+  filterRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+
+  pickerContainer: {
+    flex: 1,
     borderWidth: 1,
+    borderRadius: 10,
+    overflow: 'hidden', // Ensures picker rounded corners look good
+    height: 44,
+    justifyContent: 'center',
   },
 
   listContent: {

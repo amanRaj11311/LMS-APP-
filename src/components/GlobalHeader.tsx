@@ -90,10 +90,10 @@ const GlobalHeader: React.FC<any> = ({ navigation, route }) => {
                {/* <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuVisible(false); navigation.navigate('ProfileScreen'); }}>
                   <Text style={{color: theme.text}}>My Profile</Text>
                </TouchableOpacity> */}
-               <View style={styles.switchRow}>
+               {/* <View style={styles.switchRow}>
                   <Text style={{color: theme.text}}>{isDark ? "Dark mode" : "Light mode"}</Text>
                   <Switch value={isDark} onValueChange={toggleTheme} />
-               </View>
+               </View> */}
                <TouchableOpacity style={styles.menuItem} onPress={handleLogout}>
                   <Text style={{color: '#D32F2F', fontWeight: 'bold'}}>Logout</Text>
                </TouchableOpacity>
