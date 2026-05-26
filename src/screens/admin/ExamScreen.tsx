@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { 
-  View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, 
-  ActivityIndicator, Alert, Modal, ScrollView, RefreshControl 
+  View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Alert, 
+  Modal, ScrollView, ActivityIndicator, RefreshControl, Platform 
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Picker } from '@react-native-picker/picker';
@@ -16,7 +16,7 @@ import { subjectApi, Subject } from '../../api/subjectApi';
 import { batchApi, Batch } from '../../api/batchApi';
 
 const ExamScreen = ({ navigation }: { navigation: any }) => {
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
 
   const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'teacher' | 'student'>('student');
   const [exams, setExams] = useState<Exam[]>([]);
@@ -31,11 +31,11 @@ const ExamScreen = ({ navigation }: { navigation: any }) => {
   // Form States
   const [editingId, setEditingId] = useState<string | null>(null);
   const [title, setTitle] = useState<string>('');
+  const [description, setDescription] = useState<string>('');
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>('');
   const [selectedBatchId, setSelectedBatchId] = useState<string>('');
   const [examType, setExamType] = useState<'midterm' | 'final' | 'quiz' | 'practical' | 'internal'>('midterm');
   
-  // Combine date/time visually for user, parse as ISO for backend
   const [scheduledDateTime, setScheduledDateTime] = useState<string>('');
   const [durationText, setDurationText] = useState<string>('180');
   const [totalMarksText, setTotalMarksText] = useState<string>('100');
@@ -90,9 +90,7 @@ const ExamScreen = ({ navigation }: { navigation: any }) => {
     }
 
     setIsSubmitting(true);
-
     let formattedIsoTimestamp = scheduledDateTime;
-    // Attempt basic parsing if user typed "YYYY-MM-DD HH:MM"
     if (scheduledDateTime.includes(' ') && scheduledDateTime.length >= 15) {
         const [d, t] = scheduledDateTime.split(' ');
         formattedIsoTimestamp = `${d}T${t}:00.000Z`;
@@ -139,7 +137,6 @@ const ExamScreen = ({ navigation }: { navigation: any }) => {
     setSelectedSubjectId(typeof item.subjectId === 'object' ? item.subjectId._id : item.subjectId);
     setSelectedBatchId(typeof item.batchId === 'object' ? item.batchId._id : item.batchId);
     setExamType(item.type);
-    
     let displayDate = item.scheduledAt;
     if(item.scheduledAt && item.scheduledAt.includes('T')) {
         const parts = item.scheduledAt.split('T');
@@ -152,45 +149,6 @@ const ExamScreen = ({ navigation }: { navigation: any }) => {
     setVenueText(item.venue || '');
     setInstructionsText(item.instructions || '');
     setIsModalVisible(true);
-  };
-
-  const renderExamCard = ({ item }: { item: any }) => {
-    const subObj = typeof item.subjectId === 'object' && item.subjectId ? item.subjectId : null;
-    const subjectName = subObj ? `${subObj.name}` : 'Unknown Subject';
-    let rawDate = 'N/A';
-    if (typeof item.scheduledAt === 'string') rawDate = item.scheduledAt.replace('T', ' ').substring(0, 16);
-
-    return (
-      <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <View style={styles.cardHeader}>
-          <Text style={[styles.cardTitle, { color: theme.text }]} numberOfLines={1}>{item.title}</Text>
-          <Text style={{ fontSize: 11, fontWeight: 'bold', color: theme.primary, textTransform: 'uppercase' }}>{item.type}</Text>
-        </View>
-
-        <Text style={{ fontSize: 13, color: theme.text, marginTop: 4 }}>Subject: {subjectName}</Text>
-        <Text style={{ fontSize: 12, color: theme.subText, marginBottom: 8 }}>Time: {rawDate} | Venue: {item.venue}</Text>
-
-        <View style={styles.actionRow}>
-          <TouchableOpacity 
-            onPress={() => navigation.navigate('ExamResults', { examId: item._id, examTitle: item.title, batchId: typeof item.batchId === 'object' ? item.batchId._id : item.batchId, subjectId: subObj?._id, passingMarks: item.passingMarks, totalMarks: item.totalMarks })} 
-            style={[styles.resultBtn, { borderColor: theme.primary, backgroundColor: 'rgba(2,136,209,0.05)' }]}
-          >
-            <Text style={{ color: theme.primary, fontWeight: 'bold', fontSize: 12 }}>Exam Results</Text>
-          </TouchableOpacity>
-
-          {currentUserRole !== 'student' && (
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <TouchableOpacity onPress={() => handleEdit(item)} style={{ marginRight: 15 }}>
-                <Text style={{ color: theme.text, fontWeight: 'bold', fontSize: 13 }}>Edit</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => handleDeleteExam(item._id)}>
-                <Text style={{ color: '#D32F2F', fontWeight: 'bold', fontSize: 13 }}>Delete</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-      </View>
-    );
   };
 
   return (
@@ -207,16 +165,27 @@ const ExamScreen = ({ navigation }: { navigation: any }) => {
       <FlatList
         data={exams}
         keyExtractor={(item) => item._id}
-        renderItem={renderExamCard}
         contentContainerStyle={{ padding: 16, paddingBottom: 30 }}
         refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} colors={[theme.primary]} />}
-        ListEmptyComponent={
-          isLoading ? <ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 40 }}/> 
-          : <Text style={{ textAlign: 'center', marginTop: 30, color: theme.subText }}>No exams scheduled.</Text>
-        }
+        renderItem={({ item }) => (
+          <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <View style={styles.cardHeader}>
+              <Text style={[styles.cardTitle, { color: theme.text }]} numberOfLines={1}>{item.title}</Text>
+              <Text style={{ fontSize: 11, fontWeight: 'bold', color: theme.primary, textTransform: 'uppercase' }}>{item.type}</Text>
+            </View>
+            <Text style={{ fontSize: 13, color: theme.text, marginTop: 4 }}>Subject: {item.subjectId?.name || 'N/A'}</Text>
+            <Text style={{ fontSize: 12, color: theme.subText, marginBottom: 8 }}>Time: {item.scheduledAt?.replace('T', ' ').substring(0, 16)} | Venue: {item.venue}</Text>
+
+            {currentUserRole !== 'student' && (
+               <View style={styles.actionRow}>
+                 <TouchableOpacity onPress={() => handleEdit(item)}><Text style={{ color: theme.primary, fontWeight: 'bold' }}>Edit</Text></TouchableOpacity>
+                 <TouchableOpacity onPress={() => handleDeleteExam(item._id)}><Text style={{ color: '#D32F2F', fontWeight: 'bold' }}>Delete</Text></TouchableOpacity>
+               </View>
+            )}
+          </View>
+        )}
       />
 
-      {/* CREATE EXAM MODAL */}
       <Modal visible={isModalVisible} animationType="slide" transparent={true}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
@@ -226,55 +195,71 @@ const ExamScreen = ({ navigation }: { navigation: any }) => {
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={styles.label}>EXAM TITLE *</Text>
-              <TextInput style={[styles.input, { borderColor: theme.border, color: theme.text }]} placeholder="Mid Term - Mathematics" placeholderTextColor={theme.subText} value={title} onChangeText={setTitle} />
+              <Text style={[styles.label, { color: theme.text }]}>EXAM TITLE *</Text>
+              <TextInput style={[styles.input, { borderColor: theme.border, color: theme.text, backgroundColor: theme.background }]} placeholder="Mid Term - Mathematics" placeholderTextColor={theme.subText} value={title} onChangeText={setTitle} />
 
               <View style={styles.row}>
-                <View style={styles.halfWidth}>
-                  <Text style={styles.label}>BATCH *</Text>
-                  <View style={[styles.pickerWrapper, { borderColor: theme.border }]}><Picker selectedValue={selectedBatchId} onValueChange={setSelectedBatchId} dropdownIconColor={theme.primary}><Picker.Item label="Select batch" value="" color={theme.subText}/>{availableBatches.map(b => <Picker.Item key={b._id} label={b.name} value={b._id} />)}</Picker></View>
+                <View style={[styles.halfWidth, { opacity: editingId ? 0.6 : 1 }]}>
+                  <Text style={[styles.label, { color: theme.text }]}>BATCH *</Text>
+                  <View style={[styles.pickerWrapper, { borderColor: theme.border, backgroundColor: theme.background }]}>
+                    <Picker enabled={!editingId} selectedValue={selectedBatchId} onValueChange={setSelectedBatchId} style={{ color: theme.text }} dropdownIconColor={theme.text}>
+                      <Picker.Item label="Select batch" value="" color={isDark ? '#FFF' : '#000'} />
+                      {availableBatches.map(b => <Picker.Item key={b._id} label={b.name} value={b._id} color={isDark ? '#FFF' : '#000'} />)}
+                    </Picker>
+                  </View>
+                </View>
+                <View style={[styles.halfWidth, { opacity: editingId ? 0.6 : 1 }]}>
+                  <Text style={[styles.label, { color: theme.text }]}>SUBJECT *</Text>
+                  <View style={[styles.pickerWrapper, { borderColor: theme.border, backgroundColor: theme.background }]}>
+                    <Picker enabled={!editingId} selectedValue={selectedSubjectId} onValueChange={setSelectedSubjectId} style={{ color: theme.text }} dropdownIconColor={theme.text}>
+                      <Picker.Item label="Select subject" value="" color={isDark ? '#FFF' : '#000'} />
+                      {availableSubjects.map(s => <Picker.Item key={s._id} label={s.name} value={s._id} color={isDark ? '#FFF' : '#000'} />)}
+                    </Picker>
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.row}>
+                <View style={[styles.halfWidth, { opacity: editingId ? 0.6 : 1 }]}>
+                  <Text style={[styles.label, { color: theme.text }]}>EXAM TYPE *</Text>
+                  <View style={[styles.pickerWrapper, { borderColor: theme.border, backgroundColor: theme.background }]}>
+                    <Picker enabled={!editingId} selectedValue={examType} onValueChange={setExamType} style={{ color: theme.text }} dropdownIconColor={theme.text}>
+                      <Picker.Item label="Midterm" value="midterm" color={isDark ? '#FFF' : '#000'} />
+                      <Picker.Item label="Final" value="final" color={isDark ? '#FFF' : '#000'} />
+                      <Picker.Item label="Quiz" value="quiz" color={isDark ? '#FFF' : '#000'} />
+                    </Picker>
+                  </View>
                 </View>
                 <View style={styles.halfWidth}>
-                  <Text style={styles.label}>SUBJECT *</Text>
-                  <View style={[styles.pickerWrapper, { borderColor: theme.border }]}><Picker selectedValue={selectedSubjectId} onValueChange={setSelectedSubjectId} dropdownIconColor={theme.primary}><Picker.Item label="Select subject" value="" color={theme.subText}/>{availableSubjects.map(s => <Picker.Item key={s._id} label={s.name} value={s._id} />)}</Picker></View>
+                  <Text style={[styles.label, { color: theme.text }]}>VENUE</Text>
+                  <TextInput style={[styles.input, { borderColor: theme.border, color: theme.text, backgroundColor: theme.background }]} placeholder="Room 101" placeholderTextColor={theme.subText} value={venueText} onChangeText={setVenueText} />
                 </View>
               </View>
 
               <View style={styles.row}>
                 <View style={styles.halfWidth}>
-                  <Text style={styles.label}>EXAM TYPE *</Text>
-                  <View style={[styles.pickerWrapper, { borderColor: theme.border }]}><Picker selectedValue={examType} onValueChange={setExamType} dropdownIconColor={theme.primary}><Picker.Item label="Midterm" value="midterm" /><Picker.Item label="Final" value="final" /><Picker.Item label="Quiz" value="quiz" /></Picker></View>
+                  <Text style={[styles.label, { color: theme.text }]}>SCHEDULED DATE & TIME *</Text>
+                  <TextInput style={[styles.input, { borderColor: theme.border, color: theme.text, backgroundColor: theme.background }]} placeholder="YYYY-MM-DD HH:MM" placeholderTextColor={theme.subText} value={scheduledDateTime} onChangeText={setScheduledDateTime} />
                 </View>
                 <View style={styles.halfWidth}>
-                  <Text style={styles.label}>VENUE</Text>
-                  <TextInput style={[styles.input, { borderColor: theme.border, color: theme.text }]} placeholder="Room 101" placeholderTextColor={theme.subText} value={venueText} onChangeText={setVenueText} />
+                  <Text style={[styles.label, { color: theme.text }]}>DURATION (MINUTES) *</Text>
+                  <TextInput style={[styles.input, { borderColor: theme.border, color: theme.text, backgroundColor: theme.background }]} placeholder="180" placeholderTextColor={theme.subText} keyboardType="numeric" value={durationText} onChangeText={setDurationText} />
                 </View>
               </View>
 
               <View style={styles.row}>
-                <View style={styles.halfWidth}>
-                  <Text style={styles.label}>SCHEDULED DATE & TIME *</Text>
-                  <TextInput style={[styles.input, { borderColor: theme.border, color: theme.text }]} placeholder="YYYY-MM-DD HH:MM" placeholderTextColor={theme.subText} value={scheduledDateTime} onChangeText={setScheduledDateTime} />
+                <View style={[styles.halfWidth, { opacity: editingId ? 0.6 : 1 }]}>
+                  <Text style={[styles.label, { color: theme.text }]}>TOTAL MARKS *</Text>
+                  <TextInput editable={!editingId} style={[styles.input, { borderColor: theme.border, color: theme.text, backgroundColor: theme.background }]} placeholder="100" placeholderTextColor={theme.subText} keyboardType="numeric" value={totalMarksText} onChangeText={setTotalMarksText} />
                 </View>
-                <View style={styles.halfWidth}>
-                  <Text style={styles.label}>DURATION (MINUTES) *</Text>
-                  <TextInput style={[styles.input, { borderColor: theme.border, color: theme.text }]} placeholder="180" placeholderTextColor={theme.subText} keyboardType="numeric" value={durationText} onChangeText={setDurationText} />
-                </View>
-              </View>
-
-              <View style={styles.row}>
-                <View style={styles.halfWidth}>
-                  <Text style={styles.label}>TOTAL MARKS *</Text>
-                  <TextInput style={[styles.input, { borderColor: theme.border, color: theme.text }]} placeholder="100" placeholderTextColor={theme.subText} keyboardType="numeric" value={totalMarksText} onChangeText={setTotalMarksText} />
-                </View>
-                <View style={styles.halfWidth}>
-                  <Text style={styles.label}>PASSING MARKS *</Text>
-                  <TextInput style={[styles.input, { borderColor: theme.border, color: theme.text }]} placeholder="35" placeholderTextColor={theme.subText} keyboardType="numeric" value={passingMarksText} onChangeText={setPassingMarksText} />
+                <View style={[styles.halfWidth, { opacity: editingId ? 0.6 : 1 }]}>
+                  <Text style={[styles.label, { color: theme.text }]}>PASSING MARKS *</Text>
+                  <TextInput editable={!editingId} style={[styles.input, { borderColor: theme.border, color: theme.text, backgroundColor: theme.background }]} placeholder="35" placeholderTextColor={theme.subText} keyboardType="numeric" value={passingMarksText} onChangeText={setPassingMarksText} />
                 </View>
               </View>
 
-              <Text style={styles.label}>INSTRUCTIONS</Text>
-              <TextInput style={[styles.input, { height: 80, textAlignVertical: 'top', borderColor: theme.border, color: theme.text }]} placeholder="Bring your ID card..." placeholderTextColor={theme.subText} multiline value={instructionsText} onChangeText={setInstructionsText} />
+              <Text style={[styles.label, { color: theme.text }]}>INSTRUCTIONS</Text>
+              <TextInput style={[styles.input, { height: 80, textAlignVertical: 'top', borderColor: theme.border, color: theme.text, backgroundColor: theme.background }]} placeholder="Bring your ID card..." placeholderTextColor={theme.subText} multiline value={instructionsText} onChangeText={setInstructionsText} />
 
               <View style={styles.btnRow}>
                 <TouchableOpacity style={[styles.cancelBtn, { borderColor: theme.border }]} onPress={() => setIsModalVisible(false)}><Text style={{ color: theme.text, fontWeight: 'bold' }}>Cancel</Text></TouchableOpacity>
@@ -295,22 +280,20 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 },
   mainTitle: { fontSize: 20, fontWeight: 'bold' },
   newBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
-  card: { padding: 16, borderRadius: 10, borderWidth: 1, marginBottom: 12 },
+  card: { padding: 16, borderRadius: 10, borderWidth: 1, marginBottom: 12, marginHorizontal: 16 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   cardTitle: { fontSize: 16, fontWeight: 'bold', flex: 1, marginRight: 8 },
-  actionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 10, marginTop: 4, borderTopWidth: 0.5, borderTopColor: '#EEE' },
-  resultBtn: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 12, paddingVertical: 6 },
-  
+  actionRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 20, paddingTop: 10, marginTop: 4, borderTopWidth: 0.5, borderTopColor: '#DDD' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 10 },
   modalContent: { padding: 20, borderRadius: 12, maxHeight: '95%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
   modalTitle: { fontSize: 18, fontWeight: 'bold' },
-  label: { fontSize: 11, fontWeight: 'bold', marginBottom: 4, color: '#555' },
+  label: { fontSize: 11, fontWeight: 'bold', marginBottom: 4 },
   input: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, marginBottom: 12, height: 44 },
   row: { flexDirection: 'row', justifyContent: 'space-between' },
   halfWidth: { width: '48%' },
   pickerWrapper: { height: 44, borderWidth: 1, borderRadius: 8, justifyContent: 'center', overflow: 'hidden', marginBottom: 12 },
-  btnRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 },
+  btnRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 15 },
   cancelBtn: { paddingVertical: 10, paddingHorizontal: 20, borderWidth: 2, borderRadius: 8, marginRight: 10 },
   saveBtn: { paddingVertical: 10, paddingHorizontal: 30, borderRadius: 8 }
 });
