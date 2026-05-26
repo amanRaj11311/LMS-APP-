@@ -8,6 +8,7 @@ import { Picker } from '@react-native-picker/picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import DateTimePicker from '@react-native-community/datetimepicker'; // 🌟 IMPORT ADDED
 
 // Core Themes and Network Backend Services
 import { useTheme } from '../../theme/ThemeContext';
@@ -36,7 +37,12 @@ const ExamScreen = ({ navigation }: { navigation: any }) => {
   const [selectedBatchId, setSelectedBatchId] = useState<string>('');
   const [examType, setExamType] = useState<'midterm' | 'final' | 'quiz' | 'practical' | 'internal'>('midterm');
   
+  // 🌟 DATE PICKER STATES
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [showDatePicker, setShowDatePicker] = useState<boolean>(false);
+  const [showTimePicker, setShowTimePicker] = useState<boolean>(false);
   const [scheduledDateTime, setScheduledDateTime] = useState<string>('');
+  
   const [durationText, setDurationText] = useState<string>('180');
   const [totalMarksText, setTotalMarksText] = useState<string>('100');
   const [passingMarksText, setPassingMarksText] = useState<string>('35');
@@ -79,9 +85,42 @@ const ExamScreen = ({ navigation }: { navigation: any }) => {
 
   const resetFormState = () => {
     setEditingId(null); setTitle(''); setSelectedSubjectId(''); setSelectedBatchId('');
-    setExamType('midterm'); setScheduledDateTime(''); setDurationText('180');
-    setTotalMarksText('100'); setPassingMarksText('35'); setVenueText('Room 101');
+    setExamType('midterm'); setScheduledDateTime(''); setSelectedDate(null);
+    setDurationText('180'); setTotalMarksText('100'); setPassingMarksText('35'); setVenueText('Room 101');
     setInstructionsText('');
+  };
+
+  // 🌟 DATE & TIME PICKER HANDLERS
+  const onChangeDate = (event: any, selectedDateValue?: Date) => {
+    setShowDatePicker(Platform.OS === 'ios');
+    if (selectedDateValue) {
+      setSelectedDate(selectedDateValue);
+      // Once date is selected, open Time Picker
+      setShowTimePicker(true);
+    }
+  };
+
+  const onChangeTime = (event: any, selectedTimeValue?: Date) => {
+    setShowTimePicker(Platform.OS === 'ios');
+    if (selectedTimeValue && selectedDate) {
+      // Combine selectedDate and selectedTimeValue
+      const combinedDate = new Date(
+        selectedDate.getFullYear(),
+        selectedDate.getMonth(),
+        selectedDate.getDate(),
+        selectedTimeValue.getHours(),
+        selectedTimeValue.getMinutes()
+      );
+      
+      // Format to YYYY-MM-DD HH:MM
+      const year = combinedDate.getFullYear();
+      const month = String(combinedDate.getMonth() + 1).padStart(2, '0');
+      const day = String(combinedDate.getDate()).padStart(2, '0');
+      const hours = String(combinedDate.getHours()).padStart(2, '0');
+      const minutes = String(combinedDate.getMinutes()).padStart(2, '0');
+      
+      setScheduledDateTime(`${year}-${month}-${day} ${hours}:${minutes}`);
+    }
   };
 
   const handleSaveOrUpdate = async () => {
@@ -165,7 +204,7 @@ const ExamScreen = ({ navigation }: { navigation: any }) => {
       <FlatList
         data={exams}
         keyExtractor={(item) => item._id}
-        contentContainerStyle={{ padding: 16, paddingBottom: 30 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 30 }} // 🌟 FIX: Removed heavy padding top
         refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} colors={[theme.primary]} />}
         renderItem={({ item }) => (
           <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
@@ -239,7 +278,38 @@ const ExamScreen = ({ navigation }: { navigation: any }) => {
               <View style={styles.row}>
                 <View style={styles.halfWidth}>
                   <Text style={[styles.label, { color: theme.text }]}>SCHEDULED DATE & TIME *</Text>
-                  <TextInput style={[styles.input, { borderColor: theme.border, color: theme.text, backgroundColor: theme.background }]} placeholder="YYYY-MM-DD HH:MM" placeholderTextColor={theme.subText} value={scheduledDateTime} onChangeText={setScheduledDateTime} />
+                  {/* 🌟 FIX: Date Picker implementation */}
+                  <TouchableOpacity 
+                    onPress={() => setShowDatePicker(true)} 
+                    style={[styles.input, { borderColor: theme.border, backgroundColor: theme.background, justifyContent: 'center' }]}
+                  >
+                    <Text style={{ color: scheduledDateTime ? theme.text : theme.subText }}>
+                      {scheduledDateTime || 'Select Date & Time'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {/* DatePicker Component */}
+                  {showDatePicker && (
+                    <DateTimePicker
+                      testID="datePicker"
+                      value={selectedDate || new Date()}
+                      mode="date"
+                      is24Hour={true}
+                      display="default"
+                      minimumDate={new Date()} // Disables past dates
+                      onChange={onChangeDate}
+                    />
+                  )}
+                  {showTimePicker && (
+                    <DateTimePicker
+                      testID="timePicker"
+                      value={selectedDate || new Date()}
+                      mode="time"
+                      is24Hour={true}
+                      display="default"
+                      onChange={onChangeTime}
+                    />
+                  )}
                 </View>
                 <View style={styles.halfWidth}>
                   <Text style={[styles.label, { color: theme.text }]}>DURATION (MINUTES) *</Text>
@@ -280,7 +350,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 },
   mainTitle: { fontSize: 20, fontWeight: 'bold' },
   newBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
-  card: { padding: 16, borderRadius: 10, borderWidth: 1, marginBottom: 12, marginHorizontal: 16 },
+  card: { padding: 16, borderRadius: 10, borderWidth: 1, marginBottom: 12 }, // 🌟 FIX: Removed marginHorizontal here since contentContainerStyle handles it
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   cardTitle: { fontSize: 16, fontWeight: 'bold', flex: 1, marginRight: 8 },
   actionRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 20, paddingTop: 10, marginTop: 4, borderTopWidth: 0.5, borderTopColor: '#DDD' },
@@ -295,7 +365,7 @@ const styles = StyleSheet.create({
   pickerWrapper: { height: 44, borderWidth: 1, borderRadius: 8, justifyContent: 'center', overflow: 'hidden', marginBottom: 12 },
   btnRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 15 },
   cancelBtn: { paddingVertical: 10, paddingHorizontal: 20, borderWidth: 2, borderRadius: 8, marginRight: 10 },
-  saveBtn: { paddingVertical: 10, paddingHorizontal: 30, borderRadius: 8 }
+  saveBtn: { paddingVertical: 10, paddingHorizontal: 30, borderRadius: 7 }
 });
 
 export default ExamScreen;

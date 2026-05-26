@@ -5,10 +5,12 @@ import {
   TouchableOpacity,
   StyleSheet,
   Modal,
-  SafeAreaView,
   ScrollView,
   TextInput,
+  StatusBar,
 } from 'react-native';
+
+import { SafeAreaView } from 'react-native-safe-area-context';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 
 const TakeTestScreen = ({ route, navigation }: any) => {
@@ -56,7 +58,8 @@ useEffect(() => {
   if (isSubmitted) {
     const isPassed = score >= 40;
     return (
-      <SafeAreaView style={styles.container}>
+  <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <StatusBar barStyle="light-content" backgroundColor="#1E293B" />
         <View style={styles.resultCard}>
           <View style={[styles.successIcon, { backgroundColor: isPassed ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)' }]}>
             <MaterialIcons name={isPassed ? 'check' : 'close'} size={30} color={isPassed ? '#10B981' : '#EF4444'} />
@@ -76,11 +79,18 @@ useEffect(() => {
     );
   }
 
-  return (
-    <SafeAreaView style={styles.container}>
+ return (
+  <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+   <StatusBar barStyle="light-content" backgroundColor="#1E293B" />
       <View style={styles.header}>
         <Text style={styles.headerTitle}>{testData.title}</Text>
-        <Text style={{ color: '#FFF' }}>{Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}</Text>
+     <View style={styles.timerBadge}>
+  <MaterialIcons name="timer" size={16} color="#FFF" />
+  <Text style={styles.timerText}>
+    {Math.floor(timeLeft / 60)}:
+    {(timeLeft % 60).toString().padStart(2, '0')}
+  </Text>
+</View>
       </View>
 
       <ScrollView style={styles.mainArea}>
@@ -180,8 +190,20 @@ useEffect(() => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0F172A' },
-  header: { padding: 20, flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#1E293B' },
-  headerTitle: { color: '#FFF', fontWeight: 'bold' },
+header: {
+  paddingHorizontal: 20,
+  paddingVertical: 16,
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  backgroundColor: '#1E293B',
+},
+  headerTitle: {
+  color: '#FFF',
+  fontWeight: 'bold',
+  flex: 1,
+  marginRight: 11,
+},
   mainArea: { flex: 1, padding: 20 },
   questionText: { color: '#FFF', fontSize: 18, marginBottom: 20 },
   optionBtn: { padding: 15, borderRadius: 8, borderWidth: 1, borderColor: '#334155', marginBottom: 10 },
@@ -208,6 +230,22 @@ const styles = StyleSheet.create({
   paddingHorizontal: 20,
   paddingVertical: 10,
   borderRadius: 9,
+},
+timerBadge: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  backgroundColor: '#334155',
+  paddingHorizontal: 10,
+  paddingVertical: 6,
+  borderRadius: 999,
+  marginLeft: 10,
+},
+
+timerText: {
+  color: '#FFF',
+  fontWeight: 'bold',
+  marginLeft: 5,
+  fontSize: 13,
 },
   backBtn: { backgroundColor: '#4338CA', width: '100%', paddingVertical: 14, alignItems: 'center', borderRadius: 8, marginTop: 20 }
 });

@@ -113,26 +113,133 @@ const BatchScreen = () => {
     setIsActive(item.isActive ?? true);
     setShowForm(true);
   };
+  const getTodayDateOnly = () => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+};
 
-  const handleSaveOrUpdate = async () => {
-    if (!name.trim() || !selectedClassId || !startDateText.trim()) {
-      Alert.alert('Validation', 'Please fill all required fields');
+const parseDateOnly = (dateText: string) => {
+  const [year, month, day] = dateText.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+
+const formatDateOnly = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+};
+
+const handleStartDateChange = (event: any, selectedDate?: Date) => {
+  setShowStartPicker(false);
+
+  if (!selectedDate) return;
+
+  const today = getTodayDateOnly();
+  const pickedDate = new Date(selectedDate);
+  pickedDate.setHours(0, 0, 0, 0);
+
+  if (pickedDate < today) {
+    Alert.alert('Invalid Date', 'Start date cannot be in the past.');
+    return;
+  }
+
+  const formattedStartDate = formatDateOnly(pickedDate);
+  setStartDateText(formattedStartDate);
+
+  // If existing end date is before new start date, clear it
+  if (endDateText) {
+    const existingEndDate = parseDateOnly(endDateText);
+
+    if (existingEndDate < pickedDate) {
+      setEndDateText('');
+    }
+  }
+};
+
+const handleEndDateChange = (event: any, selectedDate?: Date) => {
+  setShowEndPicker(false);
+
+  if (!selectedDate) return;
+
+  if (!startDateText) {
+    Alert.alert('Validation', 'Please select start date first.');
+    return;
+  }
+
+  const startDate = parseDateOnly(startDateText);
+  const pickedEndDate = new Date(selectedDate);
+  pickedEndDate.setHours(0, 0, 0, 0);
+
+  if (pickedEndDate < startDate) {
+    Alert.alert(
+      'Invalid Date',
+      'End date cannot be before start date.',
+    );
+    return;
+  }
+
+  setEndDateText(formatDateOnly(pickedEndDate));
+};
+
+const handleSaveOrUpdate = async () => {
+  if (!name.trim() || !selectedClassId || !startDateText.trim()) {
+    Alert.alert('Validation', 'Please fill all required fields');
+    return;
+  }
+
+  const today = getTodayDateOnly();
+  const selectedStartDate = parseDateOnly(startDateText);
+
+  if (selectedStartDate < today) {
+    Alert.alert('Invalid Date', 'Start date cannot be in the past.');
+    return;
+  }
+
+  if (endDateText.trim()) {
+    const selectedEndDate = parseDateOnly(endDateText);
+
+    if (selectedEndDate < selectedStartDate) {
+      Alert.alert(
+        'Invalid Date',
+        'End date cannot be before start date.',
+      );
       return;
     }
-    setIsSubmitting(true);
-    const payload: any = { name: name.trim(), classId: selectedClassId, startDate: startDateText.trim(), ...(endDateText.trim() && { endDate: endDateText.trim() }) };
-    try {
-      const response = editingId ? await batchApi.update(editingId, { ...payload, isActive }) : await batchApi.create(payload);
-      if (response.success) {
-        Alert.alert('Success', 'Batch saved successfully');
-        resetFormState();
-        setShowForm(false);
-        fetchCoreDependencies();
-      } else { Alert.alert('Error', response.message || 'Could not save'); }
-    } catch (error: any) { Alert.alert('Error', 'Server connection failed'); } 
-    finally { setIsSubmitting(false); }
+  }
+
+  setIsSubmitting(true);
+
+  const payload: any = {
+    name: name.trim(),
+    classId: selectedClassId,
+    startDate: startDateText.trim(),
+    ...(endDateText.trim() && { endDate: endDateText.trim() }),
   };
 
+  try {
+    const response = editingId
+      ? await batchApi.update(editingId, { ...payload, isActive })
+      : await batchApi.create(payload);
+
+    if (response.success) {
+      Alert.alert('Success', 'Batch saved successfully');
+      resetFormState();
+      setShowForm(false);
+      fetchCoreDependencies();
+    } else {
+      Alert.alert('Error', response.message || 'Could not save');
+    }
+  } catch (error: any) {
+    Alert.alert('Error', 'Server connection failed');
+  } finally {
+    setIsSubmitting(false);
+  }
+};
   const handleDelete = (id: string) => {
     Alert.alert('Delete Batch', 'Are you sure?', [
       { text: 'Cancel', style: 'cancel' },
@@ -221,7 +328,14 @@ const BatchScreen = () => {
   </TouchableOpacity>
 
   <TouchableOpacity
-    onPress={() => setShowEndPicker(true)}
+   onPress={() => {
+  if (!startDateText) {
+    Alert.alert('Validation', 'Please select start date first.');
+    return;
+  }
+
+  setShowEndPicker(true);
+}}
     style={[
       styles.input,
       styles.halfInput,
@@ -257,8 +371,29 @@ const BatchScreen = () => {
       </Modal>
 
       {/* DatePickers (keep your existing logic here) */}
-      {showStartPicker && <DateTimePicker value={startDateText ? new Date(startDateText) : new Date()} mode="date" onChange={(e, d) => { setShowStartPicker(false); if(d) setStartDateText(d.toISOString().split('T')[0]); }} />}
-      {showEndPicker && <DateTimePicker value={endDateText ? new Date(endDateText) : new Date()} mode="date" onChange={(e, d) => { setShowEndPicker(false); if(d) setEndDateText(d.toISOString().split('T')[0]); }} />}
+     {showStartPicker && (
+  <DateTimePicker
+    value={startDateText ? parseDateOnly(startDateText) : getTodayDateOnly()}
+    mode="date"
+    minimumDate={getTodayDateOnly()}
+    onChange={handleStartDateChange}
+  />
+)}
+
+{showEndPicker && (
+  <DateTimePicker
+    value={
+      endDateText
+        ? parseDateOnly(endDateText)
+        : startDateText
+        ? parseDateOnly(startDateText)
+        : getTodayDateOnly()
+    }
+    mode="date"
+    minimumDate={startDateText ? parseDateOnly(startDateText) : getTodayDateOnly()}
+    onChange={handleEndDateChange}
+  />
+)}
 
       <FlatList
         data={batches}

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -19,6 +19,7 @@ import { Picker } from '@react-native-picker/picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import DateTimePicker from '@react-native-community/datetimepicker'; // 🌟 ADDED DATETIME PICKER
 
 import { useTheme } from '../../theme/ThemeContext';
 import { leaveApi, LeaveApplication, ApplyLeavePayload } from '../../api/leaveApi';
@@ -48,6 +49,12 @@ const LeaveScreen = ({ navigation }: { navigation: any }) => {
   const [toDateInput, setToDateInput] = useState<string>('');
   const [reasonInput, setReasonInput] = useState<string>('');
   const [selectedSubstituteId, setSelectedSubstituteId] = useState<string>('');
+
+  // 🌟 DATE PICKER STATES
+  const [showFromPicker, setShowFromPicker] = useState(false);
+  const [showToPicker, setShowToPicker] = useState(false);
+  const [fromDateVal, setFromDateVal] = useState<Date | null>(null);
+  const [toDateVal, setToDateVal] = useState<Date | null>(null);
 
   // Admin Review State
   const [reviewRemarksBuffer, setReviewRemarksBuffer] = useState<{ [key: string]: string }>({});
@@ -118,9 +125,60 @@ const LeaveScreen = ({ navigation }: { navigation: any }) => {
     setLeaveType('casual');
     setFromDateInput('');
     setToDateInput('');
+    setFromDateVal(null);
+    setToDateVal(null);
     setReasonInput('');
     setSelectedSubstituteId('');
     Keyboard.dismiss();
+  };
+
+  // 🌟 DATE FORMATTER HELPER
+  const formatDateOnly = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // 🌟 GET MINIMUM FROM DATE (1 Week in the past)
+  const getMinFromDate = () => {
+    const d = new Date();
+    d.setDate(d.getDate() - 7);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  };
+
+  // 🌟 GET MINIMUM TO DATE (Must be >= From Date)
+  const getMinToDate = () => {
+    if (fromDateVal) {
+      const d = new Date(fromDateVal);
+      d.setHours(0, 0, 0, 0);
+      return d;
+    }
+    return getMinFromDate();
+  };
+
+  // 🌟 DATE PICKER HANDLERS
+  const onFromDateChange = (event: any, selectedDate?: Date) => {
+    setShowFromPicker(Platform.OS === 'ios');
+    if (selectedDate) {
+      setFromDateVal(selectedDate);
+      setFromDateInput(formatDateOnly(selectedDate));
+      
+      // If a 'To Date' was already selected but it's before the new 'From Date', reset it.
+      if (toDateVal && toDateVal < selectedDate) {
+        setToDateVal(null);
+        setToDateInput('');
+      }
+    }
+  };
+
+  const onToDateChange = (event: any, selectedDate?: Date) => {
+    setShowToPicker(Platform.OS === 'ios');
+    if (selectedDate) {
+      setToDateVal(selectedDate);
+      setToDateInput(formatDateOnly(selectedDate));
+    }
   };
 
   const handleApplyLeaveSubmission = async () => {
@@ -306,15 +364,15 @@ const LeaveScreen = ({ navigation }: { navigation: any }) => {
           <View style={styles.filterRow}>
             <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border, flex: 1, marginRight: currentUserRole === 'admin' ? 8 : 0 }]}>
               <Picker 
-  selectedValue={filterStatus} 
-  onValueChange={(v) => setFilterStatus(v)} 
-  style={{
-    color: theme.text,
-    height: Platform.OS === 'android' ? 50 : 40,
-  }}
-  itemStyle={{ color: theme.text }}
-  dropdownIconColor={theme.primary}
->
+                selectedValue={filterStatus} 
+                onValueChange={(v) => setFilterStatus(v)} 
+                style={{
+                  color: theme.text,
+                  height: Platform.OS === 'android' ? 50 : 40,
+                }}
+                itemStyle={{ color: theme.text }}
+                dropdownIconColor={theme.primary}
+              >
                 <Picker.Item label="All Status" value="" color={theme.subText} />
                 <Picker.Item label="Pending" value="pending" />
                 <Picker.Item label="Approved" value="approved" />
@@ -325,31 +383,31 @@ const LeaveScreen = ({ navigation }: { navigation: any }) => {
             
             {currentUserRole === 'admin' && (
               <View
-  style={[
-    styles.pickerWrapper,
-    {
-      backgroundColor: theme.background,
-      borderColor: theme.border,
-      flex: 1,
-      marginLeft: 8,
-      height: 50,
-      justifyContent: 'center',
-    },
-  ]}
->
-   <Picker
-  selectedValue={filterType}
-  onValueChange={(v) => setFilterType(v)}
-  dropdownIconColor={theme.primary}
-  style={{
-    color: theme.text,
-    height: 54,
-    marginTop: Platform.OS === 'android' ? -2 : 0,
-  }}
-  itemStyle={{
-    color: theme.text,
-  }}
->
+                style={[
+                  styles.pickerWrapper,
+                  {
+                    backgroundColor: theme.background,
+                    borderColor: theme.border,
+                    flex: 1,
+                    marginLeft: 8,
+                    height: 50,
+                    justifyContent: 'center',
+                  },
+                ]}
+              >
+               <Picker
+                selectedValue={filterType}
+                onValueChange={(v) => setFilterType(v)}
+                dropdownIconColor={theme.primary}
+                style={{
+                  color: theme.text,
+                  height: 54,
+                  marginTop: Platform.OS === 'android' ? -2 : 0,
+                }}
+                itemStyle={{
+                  color: theme.text,
+                }}
+              >
                   <Picker.Item label="All Types" value="" color={theme.subText} />
                   <Picker.Item label="Casual" value="casual" />
                   <Picker.Item label="Sick" value="sick" />
@@ -390,13 +448,17 @@ const LeaveScreen = ({ navigation }: { navigation: any }) => {
               <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
                 <View style={styles.modalHeaderRow}>
                     <Text style={[styles.modalTitle, { color: theme.text }]}>Apply for Leave</Text>
-                    <TouchableOpacity onPress={() => setIsApplyModalVisible(false)}><MaterialIcons name="close" size={24} color={theme.subText}/></TouchableOpacity>
+                    <TouchableOpacity onPress={() => { setIsApplyModalVisible(false); resetFormState(); }}><MaterialIcons name="close" size={24} color={theme.subText}/></TouchableOpacity>
                 </View>
 
                 <Text style={[styles.label, { color: theme.text }]}>Leave Type *</Text>
                 <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border, marginBottom: 15 }]}>
-                  <Picker selectedValue={leaveType} onValueChange={(v) => setLeaveType(v)} style={{ color: theme.text }}>
-                    <Picker.Item label="Casual Leave" value="casual" /><Picker.Item label="Sick Leave" value="sick" /><Picker.Item label="Earned Leave" value="earned" /><Picker.Item label="Unpaid Leave" value="unpaid" /><Picker.Item label="Other" value="other" />
+                  <Picker selectedValue={leaveType} onValueChange={(v) => setLeaveType(v)} style={{ color: theme.text }} dropdownIconColor={theme.text}>
+                    <Picker.Item label="Casual Leave" value="casual" />
+                    <Picker.Item label="Sick Leave" value="sick" />
+                    <Picker.Item label="Earned Leave" value="earned" />
+                    <Picker.Item label="Unpaid Leave" value="unpaid" />
+                    <Picker.Item label="Other" value="other" />
                   </Picker>
                 </View>
 
@@ -404,7 +466,7 @@ const LeaveScreen = ({ navigation }: { navigation: any }) => {
                    <>
                      <Text style={[styles.label, { color: theme.text }]}>Substitute Teacher (Optional)</Text>
                      <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border, marginBottom: 15 }]}>
-                       <Picker selectedValue={selectedSubstituteId} onValueChange={(v) => setSelectedSubstituteId(v)} style={{ color: theme.text }}>
+                       <Picker selectedValue={selectedSubstituteId} onValueChange={(v) => setSelectedSubstituteId(v)} style={{ color: theme.text }} dropdownIconColor={theme.text}>
                          <Picker.Item label="-- None --" value="" color={theme.subText} />
                          {substituteTeachers.map(tea => <Picker.Item key={tea._id} label={`${tea.firstName} ${tea.lastName}`} value={tea._id} />)}
                        </Picker>
@@ -415,11 +477,27 @@ const LeaveScreen = ({ navigation }: { navigation: any }) => {
                 <View style={styles.row}>
                   <View style={styles.halfInput}>
                     <Text style={[styles.label, { color: theme.text }]}>Start Date *</Text>
-                    <TextInput style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="YYYY-MM-DD" placeholderTextColor={theme.subText} value={fromDateInput} onChangeText={setFromDateInput} maxLength={10} />
+                    {/* 🌟 REPLACED TEXTINPUT WITH DATE PICKER BUTTON */}
+                    <TouchableOpacity 
+                      style={[styles.input, { backgroundColor: theme.background, borderColor: theme.border, justifyContent: 'center' }]} 
+                      onPress={() => setShowFromPicker(true)}
+                    >
+                      <Text style={{ color: fromDateInput ? theme.text : theme.subText }}>
+                        {fromDateInput || "YYYY-MM-DD"}
+                      </Text>
+                    </TouchableOpacity>
                   </View>
                   <View style={styles.halfInput}>
                     <Text style={[styles.label, { color: theme.text }]}>End Date *</Text>
-                    <TextInput style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="YYYY-MM-DD" placeholderTextColor={theme.subText} value={toDateInput} onChangeText={setToDateInput} maxLength={10} />
+                    {/* 🌟 REPLACED TEXTINPUT WITH DATE PICKER BUTTON */}
+                    <TouchableOpacity 
+                      style={[styles.input, { backgroundColor: theme.background, borderColor: theme.border, justifyContent: 'center' }]} 
+                      onPress={() => setShowToPicker(true)}
+                    >
+                      <Text style={{ color: toDateInput ? theme.text : theme.subText }}>
+                        {toDateInput || "YYYY-MM-DD"}
+                      </Text>
+                    </TouchableOpacity>
                   </View>
                 </View>
 
@@ -433,6 +511,26 @@ const LeaveScreen = ({ navigation }: { navigation: any }) => {
             </KeyboardAvoidingView>
          </View>
       </Modal>
+
+      {/* 🌟 DATE PICKER MODALS */}
+      {showFromPicker && (
+        <DateTimePicker
+          value={fromDateVal || new Date()}
+          mode="date"
+          display="default"
+          minimumDate={getMinFromDate()}
+          onChange={onFromDateChange}
+        />
+      )}
+      {showToPicker && (
+        <DateTimePicker
+          value={toDateVal || fromDateVal || new Date()}
+          mode="date"
+          display="default"
+          minimumDate={getMinToDate()} // Cannot be before Start Date
+          onChange={onToDateChange}
+        />
+      )}
 
     </SafeAreaView>
   );
@@ -477,7 +575,7 @@ const styles = StyleSheet.create({
   decisionBtn: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   
   emptyContainer: { alignItems: 'center', marginTop: 60 },
-  emptyText: { textAlign: 'center', fontSize: 14, marginTop: 16, fontWeight: '500' },
+  emptyText: { textAlign: 'center', fontSize: 14, marginTop: 15, fontWeight: '500' },
 });
 
 export default LeaveScreen;

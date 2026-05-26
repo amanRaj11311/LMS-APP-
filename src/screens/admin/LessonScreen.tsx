@@ -16,11 +16,12 @@ import {
   ScrollView
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
-import { pick } from '@react-native-documents/picker'; // 🌟 Required for file upload
+import { pick } from '@react-native-documents/picker'; 
 
 // Themes and Upstream Core API Dependencies
 import { useTheme } from '../../theme/ThemeContext';
@@ -29,7 +30,7 @@ import { subjectApi, Subject } from '../../api/subjectApi';
 import { batchApi, Batch } from '../../api/batchApi';
 
 const LessonScreen = () => {
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme(); // 🌟 isDark added for safe picker colors
 
   // 🌟 DYNAMIC IDENTITY TRACKING
   const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'teacher' | 'student' | null>(null);
@@ -55,6 +56,7 @@ const LessonScreen = () => {
   
   const [inputDate, setInputDate] = useState<string>('');
   const [inputTime, setInputTime] = useState<string>('');
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [durationText, setDurationText] = useState<string>('60');
   const [contentText, setContentText] = useState<string>('');
   const [meetingLinkText, setMeetingLinkText] = useState<string>('');
@@ -62,6 +64,7 @@ const LessonScreen = () => {
 
   // 🌟 FILE UPLOAD STATE
   const [lessonFiles, setLessonFiles] = useState<any[]>([]);
+  const [existingAttachments, setExistingAttachments] = useState<string[]>([]); // 🌟 Added to track existing files
 
   useFocusEffect(
     useCallback(() => {
@@ -124,6 +127,7 @@ const LessonScreen = () => {
     setContentText('');
     setMeetingLinkText('');
     setLessonFiles([]);
+    setExistingAttachments([]); // 🌟 Reset existing files
     setIsActive(true);
     Keyboard.dismiss();
   };
@@ -146,9 +150,8 @@ const LessonScreen = () => {
      console.log(err);
      Alert.alert("Error", "Failed to pick documents");
    }
- };
+  };
  
-
   const handleTriggerEdit = (item: any) => {
     if (!item) return;
     setEditingId(item._id);
@@ -169,9 +172,48 @@ const LessonScreen = () => {
     setContentText(item.content || '');
     setMeetingLinkText(item.meetingLink || '');
     setIsActive(item.isActive !== undefined ? item.isActive : true);
-    setLessonFiles([]); // Existing attachments are managed via backend, clearing local file picker state
+    
+    // 🌟 Capture existing attachments for editing
+    setExistingAttachments(item.attachments || []); 
+    setLessonFiles([]); 
     
     setIsModalVisible(true);
+  };
+
+  const getTodayDateOnly = () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return today;
+  };
+
+  const parseDateOnly = (dateText: string) => {
+    const [year, month, day] = dateText.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
+    date.setHours(0, 0, 0, 0);
+    return date;
+  };
+
+  const formatDateOnly = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const handleLessonDateChange = (event: any, selectedDate?: Date) => {
+    setShowDatePicker(false);
+    if (!selectedDate) return;
+
+    const today = getTodayDateOnly();
+    const pickedDate = new Date(selectedDate);
+    pickedDate.setHours(0, 0, 0, 0);
+
+    if (pickedDate < today) {
+      Alert.alert('Invalid Date', 'Past dates are not allowed.');
+      return;
+    }
+
+    setInputDate(formatDateOnly(pickedDate));
   };
 
   const handleSaveOrUpdate = async () => {
@@ -180,9 +222,15 @@ const LessonScreen = () => {
     const cleanTime = inputTime.trim();
     const parsedDur = parseInt(durationText.trim(), 10);
 
-    if (!cleanTitle || !selectedSubjectId || !selectedBatchId || !cleanDate || !cleanTime || isNaN(parsedDur)) {
-      Alert.alert('Missing Details', 'Title, Batch, Subject, Date, Time, and Duration are required.');
+    // Editing mode doesn't technically need batch/subject validated again, but for safety:
+    if (!cleanTitle || !cleanDate || !cleanTime || isNaN(parsedDur)) {
+      Alert.alert('Missing Details', 'Title, Date, Time, and Duration are required.');
       return;
+    }
+
+    if (!editingId && (!selectedBatchId || !selectedSubjectId)) {
+        Alert.alert('Missing Details', 'Batch and Subject are required for new lessons.');
+        return;
     }
 
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
@@ -192,18 +240,25 @@ const LessonScreen = () => {
       return;
     }
 
+    const today = getTodayDateOnly();
+    const selectedLessonDate = parseDateOnly(cleanDate);
+    if (selectedLessonDate < today) {
+      Alert.alert('Invalid Date', 'Past dates are not allowed.');
+      return;
+    }
+
     setIsSubmitting(true);
     const formattedIsoTimestamp = `${cleanDate}T${cleanTime}:00.000Z`;
     let finalAttachmentUrls: string[] = [];
 
     try {
-      // 🌟 UPLOAD FILES FIRST IF ANY EXIST
+      // 🌟 UPLOAD NEW FILES FIRST
       if (lessonFiles.length > 0) {
         const formData = new FormData();
         lessonFiles.forEach((file) => {
           formData.append('files', { 
-            uri: file.uri,
-            type: file.type || 'application/pdf',
+            uri: Platform.OS === 'ios' ? file.uri.replace('file://', '') : file.uri,
+            type: file.type || 'application/octet-stream',
             name: file.name,
           } as any);
         });
@@ -216,23 +271,36 @@ const LessonScreen = () => {
         }
       }
 
-      const payload: any = {
-        title: cleanTitle,
-        subjectId: selectedSubjectId,
-        batchId: selectedBatchId,
-        scheduledAt: formattedIsoTimestamp,
-        duration: parsedDur,
-        type: lessonType,
-        content: contentText.trim() || undefined,
-        meetingLink: meetingLinkText.trim() || undefined,
-        ...(finalAttachmentUrls.length > 0 && { attachments: finalAttachmentUrls })
-      };
+      // 🌟 Combine Old and New Attachments
+      const allAttachments = [...existingAttachments, ...finalAttachmentUrls];
 
       let response;
       if (editingId) {
-        response = await lessonApi.update(editingId, { ...payload, isActive });
+        // UPDATE PAYLOAD (Adheres to schema rules)
+        const updatePayload = {
+            title: cleanTitle,
+            content: contentText.trim() || undefined,
+            scheduledAt: formattedIsoTimestamp,
+            duration: parsedDur,
+            meetingLink: meetingLinkText.trim() || undefined,
+            isActive: isActive,
+            attachments: allAttachments.length > 0 ? allAttachments : undefined
+        };
+        response = await lessonApi.update(editingId, updatePayload);
       } else {
-        response = await lessonApi.create(payload);
+        // CREATE PAYLOAD
+        const createPayload: any = {
+            title: cleanTitle,
+            subjectId: selectedSubjectId,
+            batchId: selectedBatchId,
+            scheduledAt: formattedIsoTimestamp,
+            duration: parsedDur,
+            type: lessonType,
+            content: contentText.trim() || undefined,
+            meetingLink: meetingLinkText.trim() || undefined,
+            attachments: allAttachments.length > 0 ? allAttachments : undefined
+        };
+        response = await lessonApi.create(createPayload);
       }
 
       if (response?.success || response?._id) {
@@ -310,6 +378,19 @@ const LessonScreen = () => {
           <Text style={[styles.infoText, { color: theme.text }]}>Schedule: {rawDate}{rawTime}</Text>
           <Text style={[styles.infoText, { color: theme.text }]}>Duration: {item.duration || 0} Mins</Text>
         </View>
+
+        {/* 🌟 View Attachments Feature inside the card */}
+        {item.attachments && item.attachments.length > 0 && (
+          <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 0.5, borderTopColor: theme.border }}>
+            <Text style={{ fontSize: 12, fontWeight: 'bold', color: theme.text, marginBottom: 4 }}>Attachments:</Text>
+            {item.attachments.map((url: string, idx: number) => (
+              <TouchableOpacity key={idx} onPress={() => Linking.openURL(url)} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                <MaterialIcons name="attach-file" size={14} color={theme.primary} />
+                <Text style={{ color: theme.primary, fontSize: 12, marginLeft: 4 }}>View Document {idx + 1}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
 
         <View style={styles.actionRow}>
           {item.meetingLink ? (
@@ -390,32 +471,37 @@ const LessonScreen = () => {
                 <TextInput style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="Introduction to Algebra" placeholderTextColor={theme.subText} value={title} onChangeText={setTitle} />
               </View>
 
-              <View style={styles.pickerContainer}>
+              {/* 🌟 DISABLED DURING EDIT MODE */}
+              <View style={[styles.pickerContainer, { opacity: editingId ? 0.6 : 1 }]}>
                 <Text style={[styles.label, { color: theme.text }]}>BATCH *</Text>
                 <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border }]}>
-                  <Picker selectedValue={selectedBatchId} onValueChange={(v) => setSelectedBatchId(v)} dropdownIconColor={theme.primary} style={{ color: theme.text }}>
-                    <Picker.Item label="Select batch" value="" color={theme.subText} />
-                    {safeBatches.map((b) => <Picker.Item key={b._id} label={b?.name} value={b._id} />)}
+                  <Picker enabled={!editingId} selectedValue={selectedBatchId} onValueChange={(v) => setSelectedBatchId(v)} dropdownIconColor={theme.text} style={{ color: theme.text }}>
+                    <Picker.Item label="Select batch" value="" color={isDark ? '#FFF' : '#000'} />
+                    {safeBatches.map((b) => <Picker.Item key={b._id} label={b?.name} value={b._id} color={isDark ? '#FFF' : '#000'} />)}
                   </Picker>
                 </View>
               </View>
 
-              <View style={styles.pickerContainer}>
+              {/* 🌟 DISABLED DURING EDIT MODE */}
+              <View style={[styles.pickerContainer, { opacity: editingId ? 0.6 : 1 }]}>
                 <Text style={[styles.label, { color: theme.text }]}>SUBJECT *</Text>
                 <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border }]}>
-                  <Picker selectedValue={selectedSubjectId} onValueChange={(v) => setSelectedSubjectId(v)} dropdownIconColor={theme.primary} style={{ color: theme.text }}>
-                    <Picker.Item label={selectedBatchId ? "Select subject" : "Select a batch first"} value="" color={theme.subText} />
-                    {safeSubjects.map((sub) => <Picker.Item key={sub._id} label={sub?.name} value={sub._id} />)}
+                  <Picker enabled={!editingId} selectedValue={selectedSubjectId} onValueChange={(v) => setSelectedSubjectId(v)} dropdownIconColor={theme.text} style={{ color: theme.text }}>
+                    <Picker.Item label={selectedBatchId ? "Select subject" : "Select a batch first"} value="" color={isDark ? '#FFF' : '#000'} />
+                    {safeSubjects.map((sub) => <Picker.Item key={sub._id} label={sub?.name} value={sub._id} color={isDark ? '#FFF' : '#000'} />)}
                   </Picker>
                 </View>
               </View>
 
               <View style={styles.row}>
-                <View style={styles.halfInput}>
+                {/* 🌟 DISABLED DURING EDIT MODE */}
+                <View style={[styles.halfInput, { opacity: editingId ? 0.6 : 1 }]}>
                   <Text style={[styles.label, { color: theme.text }]}>TYPE *</Text>
                   <View style={[styles.pickerWrapper, { backgroundColor: theme.background, borderColor: theme.border }]}>
-                    <Picker selectedValue={lessonType} onValueChange={(v) => setLessonType(v)} dropdownIconColor={theme.primary} style={{ color: theme.text }}>
-                      <Picker.Item label="Lecture" value="lecture" /><Picker.Item label="Lab" value="lab" /><Picker.Item label="Tutorial" value="tutorial" />
+                    <Picker enabled={!editingId} selectedValue={lessonType} onValueChange={(v) => setLessonType(v)} dropdownIconColor={theme.text} style={{ color: theme.text }}>
+                      <Picker.Item label="Lecture" value="lecture" color={isDark ? '#FFF' : '#000'} />
+                      <Picker.Item label="Lab" value="lab" color={isDark ? '#FFF' : '#000'} />
+                      <Picker.Item label="Tutorial" value="tutorial" color={isDark ? '#FFF' : '#000'} />
                     </Picker>
                   </View>
                 </View>
@@ -427,9 +513,24 @@ const LessonScreen = () => {
               </View>
 
               <View style={styles.row}>
-                <View style={styles.halfInput}>
-                  <Text style={[styles.label, { color: theme.text }]}>DATE (YYYY-MM-DD) *</Text>
-                  <TextInput style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.border }]} placeholder="2026-05-15" placeholderTextColor={theme.subText} value={inputDate} onChangeText={setInputDate} maxLength={10} />
+               <View style={styles.halfInput}>
+                  <Text style={[styles.label, { color: theme.text }]}>DATE *</Text>
+
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => setShowDatePicker(true)}
+                    style={[
+                      styles.input,
+                      {
+                        backgroundColor: theme.background,
+                        borderColor: theme.border,
+                        justifyContent: 'center',
+                      },
+                    ]}>
+                    <Text style={{ color: inputDate ? theme.text : theme.subText }}>
+                      {inputDate || 'Select date'}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
                 <View style={styles.halfInput}>
                   <Text style={[styles.label, { color: theme.text }]}>TIME (HH:MM) *</Text>
@@ -451,14 +552,36 @@ const LessonScreen = () => {
               {/* 🌟 LESSON ATTACHMENTS (File Upload) */}
               <View style={styles.pickerContainer}>
                 <Text style={[styles.label, { color: theme.text }]}>LESSON ATTACHMENTS</Text>
-                <TouchableOpacity onPress={handlePickFiles} style={[styles.uploadBox, { borderColor: theme.primary, backgroundColor: 'rgba(59, 130, 246, 0.05)' }]}>
+                <TouchableOpacity onPress={handlePickFiles} style={[styles.uploadBox, { borderColor: theme.primary, backgroundColor: isDark ? 'transparent' : 'rgba(59, 130, 246, 0.05)' }]}>
                   <MaterialIcons name="cloud-upload" size={28} color={theme.primary} style={{ marginBottom: 8 }} />
                   <Text style={{ color: theme.text, fontWeight: 'bold' }}>Upload lesson files</Text>
                   <Text style={{ color: theme.subText, fontSize: 11, marginTop: 4 }}>
-                    {lessonFiles.length > 0 ? `${lessonFiles.length} file(s) selected` : 'Click to select (up to 5 files)'}
+                    {lessonFiles.length > 0 ? `${lessonFiles.length} new file(s) selected` : 'Click to select (up to 5 files)'}
                   </Text>
                 </TouchableOpacity>
               </View>
+
+              {/* 🌟 Existing Files (Edit Mode Only) */}
+              {existingAttachments.map((url, i) => (
+                <View key={`ext-${i}`} style={[styles.fileRow, { borderColor: theme.border }]}>
+                  <TouchableOpacity style={{ flex: 1 }} onPress={() => Linking.openURL(url)}>
+                     <Text style={{ color: theme.primary, textDecorationLine: 'underline' }} numberOfLines={1}>Attached Document {i + 1}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setExistingAttachments(existingAttachments.filter((_, idx)=>idx !== i))}>
+                     <Text style={{color: '#EF4444', fontWeight: 'bold'}}>X</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+
+              {/* 🌟 New Files selected */}
+              {lessonFiles.map((f, i) => (
+                <View key={`new-${i}`} style={[styles.fileRow, { borderColor: theme.border }]}> 
+                  <Text style={{ flex: 1, color: theme.text }} numberOfLines={1}>{f.name}</Text>
+                  <TouchableOpacity onPress={() => setLessonFiles(lessonFiles.filter((_, idx)=>idx !== i))}>
+                     <Text style={{color: '#EF4444', fontWeight: 'bold'}}>X</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
 
               {editingId && (
                 <View style={styles.switchRow}>
@@ -480,6 +603,18 @@ const LessonScreen = () => {
           </View>
         </View>
       </Modal>
+      {showDatePicker && (
+  <DateTimePicker
+    value={
+      inputDate && parseDateOnly(inputDate) >= getTodayDateOnly()
+        ? parseDateOnly(inputDate)
+        : getTodayDateOnly()
+    }
+    mode="date"
+    minimumDate={getTodayDateOnly()}
+    onChange={handleLessonDateChange}
+  />
+)}
     </SafeAreaView>
   );
 };
@@ -516,11 +651,12 @@ const styles = StyleSheet.create({
   halfInput: { width: '48%' },
   
   uploadBox: { borderWidth: 1, borderStyle: 'dashed', borderRadius: 7, alignItems: 'center', justifyContent: 'center', paddingVertical: 20 },
+  fileRow: { flexDirection: 'row', justifyContent: 'space-between', padding: 10, borderWidth: 1, borderRadius: 6, marginBottom: 6, marginTop: 4 }, // 🌟 Added fileRow style
   switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 8 },
 
   modalActionRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 },
   cancelBtn: { paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8, borderWidth: 1, marginRight: 12, justifyContent: 'center' },
-  saveBtn: { paddingVertical: 10, paddingHorizontal: 24, borderRadius: 8, justifyContent: 'center' },
+  saveBtn: { paddingVertical: 10, paddingHorizontal: 24, borderRadius: 7, justifyContent: 'center' },
   btnText: { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
 });
 
