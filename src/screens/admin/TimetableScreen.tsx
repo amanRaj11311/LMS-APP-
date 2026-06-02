@@ -102,28 +102,104 @@ const TimetableScreen = () => {
   };
 
   useFocusEffect(useCallback(() => { fetchData(); }, []));
+  const timeToMinutes = (time: string) => {
+  const [h, m] = time.split(':').map(Number);
+  return h * 60 + m;
+};
 
-  const handleAddSlot = () => {
-   if (slotStart >= slotEnd) {
-  return Alert.alert(
-    "Invalid Time",
-    "End time must be greater than Start time"
+const isValidTimeFormat = (time: string) => {
+  return /^([01]\d|2[0-3]):([0-5]\d)$/.test(time);
+};
+
+const isSameTimeSlot = (a: any, b: any) => {
+  return (
+    a.day === b.day &&
+    a.startTime === b.startTime &&
+    a.endTime === b.endTime
   );
-}
-    const newSlot = { 
-        day: slotDay, 
-        startTime: slotStart, 
-        endTime: slotEnd, 
-        subjectId: slotSubjectId, 
-        teacherId: slotTeacherId, 
-        roomNumber: slotRoom 
-    };
-   const updatedSlots = [...slotsBuffer];
-updatedSlots.push(newSlot);
-setSlotsBuffer(updatedSlots);
+};
 
-setSlotRoom('Room 101');
+const isTimeOverlapping = (a: any, b: any) => {
+  if (a.day !== b.day) return false;
+
+  const aStart = timeToMinutes(a.startTime);
+  const aEnd = timeToMinutes(a.endTime);
+  const bStart = timeToMinutes(b.startTime);
+  const bEnd = timeToMinutes(b.endTime);
+
+  return aStart < bEnd && bStart < aEnd;
+};
+
+const getSlotValidationError = (newSlot: any, existingSlots: any[]) => {
+  if (!newSlot.day || !newSlot.startTime || !newSlot.endTime) {
+    return "Day, Start Time and End Time are required";
+  }
+
+  if (!isValidTimeFormat(newSlot.startTime) || !isValidTimeFormat(newSlot.endTime)) {
+    return "Please enter time in HH:MM format, for example 09:00";
+  }
+
+  if (timeToMinutes(newSlot.startTime) >= timeToMinutes(newSlot.endTime)) {
+    return "End time must be greater than Start time";
+  }
+
+  if (!newSlot.subjectId) {
+    return "Please select Subject";
+  }
+
+  if (!newSlot.teacherId) {
+    return "Please select Teacher";
+  }
+
+  const exactDuplicate = existingSlots.some(slot => isSameTimeSlot(slot, newSlot));
+
+  if (exactDuplicate) {
+    return "This day and time slot already exists. Please choose another time.";
+  }
+
+  const overlappingSlot = existingSlots.some(slot => isTimeOverlapping(slot, newSlot));
+
+  if (overlappingSlot) {
+    return "This time overlaps with an existing slot on the same day.";
+  }
+
+  const sameTeacherSubjectSameDay = existingSlots.some(slot =>
+    slot.day === newSlot.day &&
+    slot.teacherId === newSlot.teacherId &&
+    slot.subjectId === newSlot.subjectId
+  );
+
+  if (sameTeacherSubjectSameDay) {
+    return "Same teacher and same subject already exists for this day.";
+  }
+
+  return "";
+};
+
+ const handleAddSlot = () => {
+  const newSlot = { 
+    day: slotDay, 
+    startTime: slotStart.trim(), 
+    endTime: slotEnd.trim(), 
+    subjectId: slotSubjectId, 
+    teacherId: slotTeacherId, 
+    roomNumber: slotRoom 
   };
+
+  const error = getSlotValidationError(newSlot, slotsBuffer);
+
+  if (error) {
+    return Alert.alert("Invalid Slot", error);
+  }
+
+  setSlotsBuffer(prev => [...prev, newSlot]);
+
+  setSlotStart('09:00');
+  setSlotEnd('10:00');
+  setSlotSubjectId('');
+  setSlotTeacherId('');
+  setSlotRoom('Room 101');
+};
 
   const handleTriggerEdit = (item: any) => {
     setEditingId(item._id);
@@ -175,6 +251,19 @@ const isPastDate = (date: string) => {
       "Batch, Class, Effective From Date, and at least one Slot are required"
     );
   }
+  for (let i = 0; i < slotsBuffer.length; i++) {
+  const currentSlot = slotsBuffer[i];
+  const otherSlots = slotsBuffer.filter((_, index) => index !== i);
+
+  const error = getSlotValidationError(currentSlot, otherSlots);
+
+  if (error) {
+    return Alert.alert(
+      "Duplicate Slot Found",
+      `${error}\n\nProblem slot: ${currentSlot.day} ${currentSlot.startTime} - ${currentSlot.endTime}`
+    );
+  }
+}
 
   // Prevent past effective from
   if (isPastDate(effectiveFrom)) {
