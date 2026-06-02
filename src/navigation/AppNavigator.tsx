@@ -264,7 +264,7 @@ const CustomDrawerContent = (props: DrawerContentComponentProps) => {
       <View style={[styles.footerContainer, { borderTopColor: theme.border }]}>
         <TouchableOpacity style={[styles.logoutBtn, { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEE2E2' }]} onPress={handleLogout} activeOpacity={0.8}>
           <MaterialIcons name="logout" size={20} color="#EF4444" />
-          <Text style={styles.logoutText}>Log Out</Text>
+          <Text style={styles.logoutText}>Sign Out</Text>
         </TouchableOpacity>
       </View>
     </View>

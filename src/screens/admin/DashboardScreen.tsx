@@ -131,7 +131,7 @@ const DashboardScreen = ({ navigation }: { navigation: any }) => {
             try {
                const [annRes, subjRes, assigRes] = await Promise.allSettled([
                  apiClient.get('/api/announcements/teacher'),
-                 apiClient.get('/api/subjects'), // change to my-subjects if route exists
+                 apiClient.get('/api/my-subjects'), // change to my-subjects if route exists
                  apiClient.get('/api/assignments') // change to teacher specific if needed
                ]);
                
@@ -232,7 +232,7 @@ const DashboardScreen = ({ navigation }: { navigation: any }) => {
     );
   }
 
-  const displayAnnouncements = Array.isArray(recentAnnouncements) ? recentAnnouncements.slice(0, 2) : [];
+  const displayAnnouncements = Array.isArray(recentAnnouncements) ? recentAnnouncements.slice(0, 3) : [];
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['bottom']}>
@@ -323,11 +323,13 @@ const DashboardScreen = ({ navigation }: { navigation: any }) => {
               <View key={ann._id || idx} style={[styles.announcementCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
                   <MaterialIcons name="campaign" size={20} color="#F59E0B" />
-                  <Text style={[styles.announcementTitle, { color: theme.text }]} numberOfLines={1}>{ann.title || 'Notification'}</Text>
+           <Text style={[styles.announcementTitle, { color: theme.text }]}>
+  {ann.title || 'Notification'}
+</Text>
                 </View>
-                <Text style={[styles.announcementDesc, { color: theme.subText }]} numberOfLines={2}>
-                  {ann.description || ann.content || 'No details provided.'}
-                </Text>
+               <Text style={[styles.announcementDesc, { color: theme.subText }]}>
+  {ann.description || ann.content || 'No details provided.'}
+</Text>
                 <Text style={{ fontSize: 11, color: theme.subText, marginTop: 8 }}>{dateStr}</Text>
               </View>
             );
@@ -372,7 +374,7 @@ const styles = StyleSheet.create({
   announcementHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, marginBottom: 12 },
   announcementCard: { padding: 16, borderRadius: 12, borderWidth: 1, marginBottom: 12 },
   announcementTitle: { fontSize: 14, fontWeight: 'bold', marginLeft: 9, flex: 1 },
-  announcementDesc: { fontSize: 14, lineHeight: 18 },
+  announcementDesc: { fontSize: 14, lineHeight: 20 },
 });
 
 export default DashboardScreen;
