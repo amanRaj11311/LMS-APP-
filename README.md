@@ -1,6 +1,6 @@
 # 🎓 LMS / Educational Management System Mobile App
 
-A comprehensive, role-based mobile application built with **React Native** and **TypeScript** for managing educational institutions. It streamlines daily academic operations including Exam scheduling, Noticeboard announcements, Leave applications, and User management.
+A comprehensive, role-based mobile application built with **React Native** and **TypeScript** for managing educational institutions. It streamlines daily academic operations including Exam scheduling, Noticeboard announcements, Leave applications, and User management, Batch,Subject,enrollemnt,teacher,student Management.
 
 ## ✨ Key Features
 
