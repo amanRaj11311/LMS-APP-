@@ -1,97 +1,65 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# 🎓 LMS / Educational Management System Mobile App
 
-# Getting Started
+A comprehensive, role-based mobile application built with **React Native** and **TypeScript** for managing educational institutions. It streamlines daily academic operations including Exam scheduling, Noticeboard announcements, Leave applications, and User management.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+## ✨ Key Features
 
-## Step 1: Start Metro
+### 🔐 Role-Based Access Control (RBAC)
+The app dynamically adapts its UI and functionality based on three primary user roles:
+* **Admin:** Full access to manage all modules, review leaves, create users, and broadcast global announcements.
+* **Teacher:** Can manage their own exams, apply for leaves, view specific announcements, and broadcast to their assigned batches.
+* **Student:** Read-only access to view their scheduled exams, read targeted announcements, and apply for personal leaves.
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+### 📝 Module Highlights
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+* **📢 Announcements & Noticeboard**
+    * Create and broadcast notices to targeted audiences (Everyone, All Students, All Teachers, or Specific Batches).
+    * Attach up to 3 files (PDF, JPG, PNG) per announcement.
+    * Pin important notices to the top of the feed.
+    * Set auto-expiration dates for time-sensitive notices.
+* **✍️ Exam Management**
+    * Schedule exams (Midterm, Final, Quiz, Practical, Internal) for specific batches and subjects.
+    * Set duration, total marks, passing marks, and venue.
+    * Built-in Date and Time pickers for strict scheduling.
+* **📅 Leave Management**
+    * Apply for various leave types (Casual, Sick, Earned, Unpaid).
+    * Select substitute teachers (for Teacher roles).
+    * Admin dashboard to review, approve, or reject leave applications with remarks.
+    * Filter leaves by Status (Pending, Approved, Rejected) and Type.
+* **👥 User Management (Admin)**
+    * Interactive KPI dashboard (Total Users, Students, Teachers, Admins).
+    * Create, Edit, and Delete users.
+    * Advanced filtering by Role and Batch.
 
-```sh
-# Using npm
-npm start
+## 🛠️ Tech Stack
 
-# OR using Yarn
-yarn start
-```
+* **Framework:** React Native / Expo
+* **Language:** TypeScript
+* **State Management:** React Context API (`ThemeContext`, Auth state)
+* **Storage:** `@react-native-async-storage/async-storage` (User session & token management)
+* **Navigation:** `@react-navigation/native` (Stack & Tab navigation)
+* **UI Components:** * `@react-native-picker/picker` (Dropdowns)
+    * `@react-native-community/datetimepicker` (Native Date/Time selection)
+    * `react-native-vector-icons` (MaterialIcons)
+* **File Handling:** `@react-native-documents/picker` (File attachments)
 
-## Step 2: Build and run your app
+## 📂 Folder Structure 
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
-
-### Android
-
-```sh
-# Using npm
-npm run android
-
-# OR using Yarn
-yarn android
-```
-
-### iOS
-
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
-
-```sh
-bundle install
-```
-
-Then, and every time you update your native dependencies, run:
-
-```sh
-bundle exec pod install
-```
-
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
-
-```sh
-# Using npm
-npm run ios
-
-# OR using Yarn
-yarn ios
-```
-
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
-
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
-
-## Step 3: Modify your app
-
-Now that you have successfully run the app, let's make changes!
-
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
-
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
-
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+```text
+src/
+├── api/                # API service wrappers (axios/fetch)
+│   ├── announcementApi.ts
+│   ├── batchApi.ts
+│   ├── examApi.ts
+│   ├── leaveApi.ts
+│   ├── subjectApi.ts
+│   └── userApi.ts
+├── components/         # Reusable UI components
+├── screens/            # Main application screens
+│   ├── AnnouncementScreen.tsx
+│   ├── ExamScreen.tsx
+│   ├── LeaveScreen.tsx
+│   └── UserScreen.tsx
+├── theme/              # Theming configuration
+│   └── ThemeContext.tsx
+└── App.tsx             # Application entry point
